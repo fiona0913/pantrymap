@@ -378,7 +378,101 @@ document.addEventListener('DOMContentLoaded', function() {
   function getWishlistKey(pantryId){ return `wishlist_${pantryId}`; }
   function loadWishlist(pantryId){ try{ const s=localStorage.getItem(getWishlistKey(pantryId)); return s?JSON.parse(s):[]; }catch(e){return[];} }
   function saveWishlist(pantryId, items){ try{ localStorage.setItem(getWishlistKey(pantryId), JSON.stringify(items)); }catch(e){} }
-  function renderWishlist(pantryId){ const root=document.getElementById('mp-wishlist'); if(!root) return; const items=loadWishlist(pantryId); if(items.length===0){ root.innerHTML='<div class="wishlist-empty">No requests from receivers yet.</div>'; return; } root.innerHTML = `<div class="wishlist-grid">${items.map(it=>`<div class="wishlist-item-card${it.fulfilled?' fulfilled':''}"><div class="wishlist-item-info"><strong>${escapeHtml(it.item)}</strong><div class="wishlist-item-meta">Qty: ${it.quantity||1} · Requested: ${it.createdAt?formatDateTimeMinutes(it.createdAt):''}</div></div><div class="wishlist-actions"><button class="mp-fulfill${it.fulfilled?' done':''}" data-id="${it.id}" title="${it.fulfilled?'Fulfilled — click to remove':'Mark as fulfilled'}">${it.fulfilled?'&#10003; Fulfilled':'&#10003; Confirm'}</button>${it.fulfilled?`<button class="mp-delete" data-id="${it.id}" title="Remove request">&times;</button>`:''}</div></div>`).join('')}</div>`; root.querySelectorAll('.mp-fulfill').forEach(btn=>btn.addEventListener('click', (e)=>{ const id=btn.getAttribute('data-id'); const it = items.find(x=>x.id===id); if(!it) return; if(it.fulfilled){ /* already fulfilled, do nothing */ return; } it.fulfilled=true; it.fulfilledAt=new Date().toISOString(); saveWishlist(pantryId, items); renderWishlist(pantryId); })); root.querySelectorAll('.mp-delete').forEach(btn=>btn.addEventListener('click', (e)=>{ const id=btn.getAttribute('data-id'); const filtered=items.filter(x=>x.id!==id); saveWishlist(pantryId, filtered); renderWishlist(pantryId); })); }
+
+  // Seed 8 sample receiver requests if wishlist is empty
+  function seedSampleRequests(pantryId){
+    const existing = loadWishlist(pantryId);
+    if (existing.length > 0) return;
+    const samples = [
+      { item:'Canned Vegetables', quantity:5, requester:'Maria G.' },
+      { item:'Rice (5 lb bag)', quantity:3, requester:'James L.' },
+      { item:'Baby Formula', quantity:2, requester:'Sarah K.' },
+      { item:'Peanut Butter', quantity:4, requester:'David W.' },
+      { item:'Pasta & Sauce', quantity:6, requester:'Lin C.' },
+      { item:'Canned Tuna', quantity:4, requester:'Ahmed R.' },
+      { item:'Diapers (Size 3)', quantity:2, requester:'Jessica M.' },
+      { item:'Cooking Oil', quantity:3, requester:'Tom H.' }
+    ];
+    const now = Date.now();
+    const items = samples.map((s, i) => ({
+      id: `req_${now}_${i}`,
+      item: s.item,
+      quantity: s.quantity,
+      requester: s.requester,
+      status: 'pending',
+      createdAt: new Date(now - (i * 3600000 * 12 + Math.random() * 3600000 * 24)).toISOString()
+    }));
+    saveWishlist(pantryId, items);
+  }
+
+  function renderWishlist(pantryId){
+    const root = document.getElementById('mp-wishlist');
+    if (!root) return;
+    const items = loadWishlist(pantryId);
+
+    // Update counter badge
+    const pendingCount = items.filter(x => x.status === 'pending').length;
+    const donatedCount = items.filter(x => x.status === 'donated').length;
+    const counterEl = document.getElementById('wishlist-counter');
+    if (counterEl) {
+      counterEl.innerHTML = `<span class="wl-count pending">${pendingCount} pending</span><span class="wl-count donated">${donatedCount} donated</span>`;
+    }
+
+    if (items.length === 0) {
+      root.innerHTML = '<div class="wishlist-empty">No requests from receivers yet.</div>';
+      return;
+    }
+
+    // Sort: pending first, then donated
+    const sorted = items.slice().sort((a, b) => {
+      if (a.status === 'pending' && b.status !== 'pending') return -1;
+      if (a.status !== 'pending' && b.status === 'pending') return 1;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+
+    root.innerHTML = `<div class="wishlist-grid">${sorted.map(it => {
+      const isPending = it.status === 'pending';
+      const statusClass = isPending ? 'pending' : 'donated';
+      return `<div class="wishlist-item-card ${statusClass}">
+        <div class="wishlist-item-info">
+          <div class="wishlist-item-name">${escapeHtml(it.item)}</div>
+          <div class="wishlist-item-meta">Qty: ${it.quantity || 1} · From: ${escapeHtml(it.requester || 'Anonymous')} · ${it.createdAt ? formatDateTimeMinutes(it.createdAt) : ''}</div>
+        </div>
+        <div class="wishlist-actions">
+          ${isPending
+            ? `<button class="wl-mark-btn mark-donated" data-id="${it.id}">Donated</button><button class="wl-mark-btn mark-pending-still" data-id="${it.id}">Not Yet</button>`
+            : `<span class="wl-donated-label">Donated</span><button class="wl-remove-btn" data-id="${it.id}" title="Remove">&times;</button>`
+          }
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+
+    // "Donated" button — mark as donated
+    root.querySelectorAll('.mark-donated').forEach(btn => btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-id');
+      const it = items.find(x => x.id === id);
+      if (!it) return;
+      it.status = 'donated';
+      it.fulfilledAt = new Date().toISOString();
+      saveWishlist(pantryId, items);
+      renderWishlist(pantryId);
+    }));
+
+    // "Not Yet" button — keep as pending (visual feedback only)
+    root.querySelectorAll('.mark-pending-still').forEach(btn => btn.addEventListener('click', () => {
+      btn.textContent = 'Noted';
+      btn.disabled = true;
+      setTimeout(() => { btn.textContent = 'Not Yet'; btn.disabled = false; }, 1200);
+    }));
+
+    // Remove button (only on donated items)
+    root.querySelectorAll('.wl-remove-btn').forEach(btn => btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-id');
+      const filtered = items.filter(x => x.id !== id);
+      saveWishlist(pantryId, filtered);
+      renderWishlist(pantryId);
+    }));
+  }
 
   // Chart renderers (reuse simplified logic)
   function renderWeightChartInto(container, data, cycles){ const svg = document.querySelector('[data-weight-chart]'); const legend = document.querySelector('[data-weight-legend]'); const rangeLabel = document.querySelector('[data-weight-range]'); if(!svg||!legend||!rangeLabel) return; if(!Array.isArray(data)||data.length===0){ svg.innerHTML=''; legend.textContent='No weight data available.'; rangeLabel.textContent=''; return; } const width=svg.viewBox.baseVal.width||720; const height=svg.viewBox.baseVal.height||320; const margin={top:20,right:32,bottom:36,left:56}; const plotWidth=width-margin.left-margin.right; const plotHeight=height-margin.top-margin.bottom; const minWeight=Math.min(...data.map(d=>d.weightKg)); const maxWeight=Math.max(...data.map(d=>d.weightKg)); const scaleY=(v)=> maxWeight===minWeight? margin.top+plotHeight/2 : margin.top + (maxWeight - v)*(plotHeight/(maxWeight-minWeight)); const scaleX=(i)=> data.length===1? margin.left + plotWidth/2 : margin.left + (i/(data.length-1))*plotWidth; const points = data.map((d,i)=>`${scaleX(i)},${scaleY(d.weightKg)}`).join(' '); svg.innerHTML = `<rect x="${margin.left}" y="${margin.top}" width="${plotWidth}" height="${plotHeight}" fill="var(--bg)" stroke="var(--border)" stroke-width="1" rx="8"></rect><polyline fill="none" stroke="var(--accent)" stroke-width="3" points="${points}"></polyline>${data.map((d,i)=>`<circle class="weight-point" data-ts="${d.ts}" cx="${scaleX(i)}" cy="${scaleY(d.weightKg)}" r="4" fill="var(--primary)"><title>${formatDateTimeMinutes(d.ts)} — ${d.weightKg.toFixed(2)} kg</title></circle>`).join('')}`; legend.textContent = `Min ${minWeight.toFixed(2)} kg · Max ${maxWeight.toFixed(2)} kg`; rangeLabel.textContent = `${formatDateTimeMinutes(data[0].ts)} → ${formatDateTimeMinutes(data[data.length-1].ts)}`; }
@@ -815,9 +909,10 @@ document.addEventListener('DOMContentLoaded', function() {
     renderStatusCards(pantry);
     renderInventoryCategories(pantry);
 
-    // wishlist
+    // wishlist — seed sample data then render
+    seedSampleRequests(pantry.id);
     renderWishlist(pantry.id);
-    document.getElementById('mp-wishlist-add')?.addEventListener('click', ()=>{ const name = prompt('Wishlist item name:'); if(!name) return; const items = loadWishlist(pantry.id); const newItem = { id:`it_${Date.now()}`, item: name, quantity:1, createdAt: new Date().toISOString() }; items.push(newItem); saveWishlist(pantry.id, items); renderWishlist(pantry.id); });
+    document.getElementById('mp-wishlist-add')?.addEventListener('click', ()=>{ const name = prompt('Item name requested:'); if(!name) return; const qty = parseInt(prompt('Quantity needed:', '1'), 10) || 1; const requester = prompt('Requester name (optional):', '') || 'Anonymous'; const items = loadWishlist(pantry.id); const newItem = { id:`req_${Date.now()}`, item: name, quantity: qty, requester: requester, status:'pending', createdAt: new Date().toISOString() }; items.push(newItem); saveWishlist(pantry.id, items); renderWishlist(pantry.id); });
 
     // initialize mini map preview (if location present)
     setupMiniMap(pantry);

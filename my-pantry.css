@@ -224,38 +224,68 @@ circle.weight-point.highlight { stroke: #ff9800; stroke-width: 2; }
 .wishlist-desc { color:var(--mp-muted); font-size:13px; margin:4px 0 0; }
 .wishlist-empty { color:var(--mp-muted); text-align:center; padding:32px 16px; font-size:14px; }
 
+/* Wishlist header right side */
+.wishlist-header-right { display:flex; flex-direction:column; align-items:flex-end; gap:8px; }
+.wishlist-counter { display:flex; gap:8px; }
+.wl-count { padding:4px 10px; border-radius:999px; font-size:12px; font-weight:700; }
+.wl-count.pending { background:#fef3c7; color:#92400e; }
+.wl-count.donated { background:#dcfce7; color:#166534; }
+
+/* Wishlist grid */
 #mp-wishlist .wishlist-grid { display:flex; flex-direction:column; gap:8px; }
 #mp-wishlist .wishlist-item-card {
-  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  display:flex; align-items:center; justify-content:space-between; gap:14px;
   padding:14px 16px; border-radius:10px; background:#fff; border:1px solid var(--border);
-  transition: background 180ms ease, border-color 180ms ease;
+  transition: background 180ms ease, border-color 180ms ease, opacity 180ms ease;
+  position:relative; overflow:hidden;
 }
-#mp-wishlist .wishlist-item-card.fulfilled {
-  background: #f0fdf4; border-color: #bbf7d0;
+#mp-wishlist .wishlist-item-card::before {
+  content:''; position:absolute; left:0; top:0; bottom:0; width:4px;
+  border-top-left-radius:10px; border-bottom-left-radius:10px;
 }
+#mp-wishlist .wishlist-item-card.pending::before { background:#f59e0b; }
+#mp-wishlist .wishlist-item-card.donated { background:#f0fdf4; border-color:#bbf7d0; opacity:0.85; }
+#mp-wishlist .wishlist-item-card.donated::before { background:#10b981; }
+
 #mp-wishlist .wishlist-item-info { flex:1; min-width:0; }
-#mp-wishlist .wishlist-item-info strong { font-size:15px; color:var(--text); }
+.wishlist-item-name { font-size:15px; font-weight:700; color:var(--text); }
+#mp-wishlist .wishlist-item-card.donated .wishlist-item-name { text-decoration:line-through; color:var(--mp-muted); }
 #mp-wishlist .wishlist-item-meta { color:var(--mp-muted); font-size:12px; margin-top:4px; }
 #mp-wishlist .wishlist-actions { display:flex; align-items:center; gap:8px; flex-shrink:0; }
 
-/* Confirm / Fulfilled button */
-.mp-fulfill {
-  padding:6px 14px; border-radius:8px; border:1px solid #10b981; background:transparent;
-  color:#10b981; font-weight:700; font-size:13px; cursor:pointer;
-  transition: background 140ms ease, color 140ms ease;
+/* Mark buttons */
+.wl-mark-btn {
+  padding:6px 14px; border-radius:8px; font-weight:700; font-size:13px; cursor:pointer;
+  border:1px solid transparent; transition: background 140ms ease, color 140ms ease;
 }
-.mp-fulfill:hover { background:#ecfdf5; }
-.mp-fulfill.done {
-  background:#dcfce7; color:#166534; border-color:#86efac; cursor:default;
+.wl-mark-btn.mark-donated {
+  background:#10b981; color:#fff; border-color:#10b981;
+}
+.wl-mark-btn.mark-donated:hover { background:#059669; }
+.wl-mark-btn.mark-pending-still {
+  background:transparent; color:#6b7280; border-color:#d1d5db;
+}
+.wl-mark-btn.mark-pending-still:hover { background:#f3f4f6; }
+.wl-mark-btn:disabled { opacity:0.5; cursor:default; }
+
+/* Donated label */
+.wl-donated-label {
+  padding:5px 12px; border-radius:8px; font-size:12px; font-weight:700;
+  background:#dcfce7; color:#166534;
 }
 
-/* Delete (x) button */
-#mp-wishlist .mp-delete {
+/* Remove button */
+.wl-remove-btn {
   width:32px; height:32px; border-radius:8px; border:1px solid #fecaca; background:transparent;
   color:#ef4444; font-size:16px; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center;
   transition: background 140ms ease;
 }
-#mp-wishlist .mp-delete:hover { background:#fef2f2; }
+.wl-remove-btn:hover { background:#fef2f2; }
+
+@media (max-width:600px) {
+  .wishlist-header { flex-direction:column; }
+  .wishlist-header-right { align-items:flex-start; }
+}
 
 /* Activity and settings placeholders */
 #activityLog { color:var(--muted); }
