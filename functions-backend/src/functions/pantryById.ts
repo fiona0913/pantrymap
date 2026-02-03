@@ -1,6 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { CosmosClient } from "@azure/cosmos";
-import { corsHeaders, handleOptions } from "../lib/cors";
 
 function getClient() {
   const endpoint = process.env.COSMOS_ENDPOINT;
@@ -13,16 +12,12 @@ export async function getPantryById(
   req: HttpRequest,
   context: InvocationContext
 ): Promise<HttpResponseInit> {
-  if (req.method === "OPTIONS") {
-    return handleOptions(req);
-  }
-  const origin = req.headers.get("origin");
   try {
     const id = req.params.id;
     if (!id) {
       return {
         status: 400,
-        headers: { "Content-Type": "application/json", ...corsHeaders(origin) },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ error: "Missing pantry id." })
       };
     }
@@ -39,7 +34,7 @@ export async function getPantryById(
     if (!resource) {
       return {
         status: 404,
-        headers: { "Content-Type": "application/json", ...corsHeaders(origin) },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ error: "Pantry not found." })
       };
     }
@@ -56,14 +51,14 @@ export async function getPantryById(
 
     return {
       status: 200,
-      headers: { "Content-Type": "application/json", ...corsHeaders(origin) },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(cleaned)
     };
   } catch (err: any) {
     context.log("getPantryById error:", err?.message || err);
     return {
       status: 500,
-      headers: { "Content-Type": "application/json", ...corsHeaders(origin) },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ error: "Failed to fetch pantry.", detail: err?.message || String(err) })
     };
   }
@@ -71,7 +66,7 @@ export async function getPantryById(
 
 app.http("pantryById", {
   route: "pantries/{id}",
-  methods: ["GET", "OPTIONS"],
+  methods: ["GET"],
   authLevel: "anonymous",
   handler: getPantryById
 });

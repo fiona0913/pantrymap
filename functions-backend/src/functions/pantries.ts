@@ -1,6 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { CosmosClient } from "@azure/cosmos";
-import { corsHeaders, handleOptions } from "../lib/cors";
 
 function getClient() {
   const endpoint = process.env.COSMOS_ENDPOINT;
@@ -14,13 +13,9 @@ function getClient() {
 }
 
 export async function getPantries(
-  req: HttpRequest,
+  _req: HttpRequest,
   context: InvocationContext
 ): Promise<HttpResponseInit> {
-  if (req.method === "OPTIONS") {
-    return handleOptions(req);
-  }
-  const origin = req.headers.get("origin");
   try {
     const dbName = process.env.COSMOS_DATABASE ?? "microPantry";
     const containerName = process.env.COSMOS_CONTAINER_PANTRIES ?? "pantries";
@@ -34,14 +29,14 @@ export async function getPantries(
 
     return {
       status: 200,
-      headers: { "Content-Type": "application/json", ...corsHeaders(origin) },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(resources ?? []),
     };
   } catch (err: any) {
     context.log("getPantries error:", err?.message || err);
     return {
       status: 500,
-      headers: { "Content-Type": "application/json", ...corsHeaders(origin) },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         error: "Failed to fetch pantries.",
         detail: err?.message || String(err),
@@ -51,7 +46,7 @@ export async function getPantries(
 }
 
 app.http("pantries", {
-  methods: ["GET", "OPTIONS"],
+  methods: ["GET"],
   authLevel: "anonymous",
   handler: getPantries,
 });

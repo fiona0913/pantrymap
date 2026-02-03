@@ -8,10 +8,17 @@
   let allPantries = [];
   let wishlistState = {
     items: [],
-    pantryId: null
+    pantryId: null,
+    root: null
   };
   let messageState = {
     items: [],
+    expanded: false,
+    pantryId: null,
+    root: null
+  };
+  let donorNotesState = {
+    latest: null,
     pantryId: null,
     root: null
   };
@@ -382,9 +389,7 @@
     attachImageFallbacks(detailsContent);
     // Initialize carousel if present
     setupCarousel(detailsContent);
-    // Load latest live pantry photo
-    loadLatestLivePhoto(pantry);
-    bindLivePhotoUploader(detailsContent, pantry);
+    bindDonorNotesModule(detailsContent, pantry);
     bindWishlistModule(detailsContent, pantry);
     bindMessageModule(detailsContent, pantry);
     
@@ -422,7 +427,6 @@
     const distanceText = pantry.distance || '1 mi';
     const addressText = pantry.address || '123 1st St, Bellevue, 98005';
     const description = pantry.description || pantry.summary || 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.';
-    const livePhotoPlaceholderTime = 'No recent uploads';
     const pantryTypeLabel = pantry.pantryType
       ? pantry.pantryType.charAt(0).toUpperCase() + pantry.pantryType.slice(1)
       : 'Pantry';
@@ -431,8 +435,8 @@
       : contactName;
     const sensors = pantry.sensors || {};
     const telemetryMarkup = `
-      <section class="detail-section telemetry-section">
-        <div class="section-heading-row">
+      <section class="detail-section detail-card-section telemetry-section">
+        <div class="detail-card-head">
           <h2>Sensor data</h2>
         </div>
         <div class="telemetry-grid">
@@ -481,21 +485,20 @@
           </div>
           ${renderStockGauge(totalItems)}
         </div>
-        <div class="stock-side">
-          <div class="live-photo-card" data-live-photo>
-            <div class="live-photo-thumb">
-              ${contentPhotoTag(null, 160, `${pantry.name || 'Pantry'} live pantry photo`)}
-              <span class="live-photo-ts" data-live-photo-ts>${livePhotoPlaceholderTime}</span>
-            </div>
-            <button class="live-photo-upload" type="button" data-live-photo-upload>Upload new photo</button>
-          </div>
-        </div>
       </section>
 
       ${telemetryMarkup}
 
-      <section class="detail-section wishlist-section" data-wishlist>
-        <div class="section-heading-row">
+      <section class="detail-section donor-notes-section">
+        <h2>Donor Notes</h2>
+        <button class="donor-notes-cta" type="button" data-donor-note-add>Add new donor note</button>
+        <div class="donor-notes-latest" data-donor-notes-latest>
+          <div class="donor-note-empty">Loading…</div>
+        </div>
+      </section>
+
+      <section class="detail-section detail-card-section wishlist-section" data-wishlist>
+        <div class="detail-card-head section-heading-row">
           <h2>Pantry Wishlist</h2>
           <button class="wishlist-add" type="button" aria-label="Add wishlist item" data-wishlist-add>+</button>
         </div>
@@ -510,6 +513,7 @@
         <div class="message-list" data-message-list>
           <div class="message-empty">Loading messages…</div>
         </div>
+        <button class="message-toggle section-link" type="button" data-message-toggle hidden>View more</button>
       </section>
     `;
   }
@@ -591,56 +595,152 @@
     btn.setAttribute('aria-label', isCollapsed ? 'Expand details' : 'Back to list');
   }
 
-  async function loadLatestLivePhoto(pantry) {
-    if (!pantry || !pantry.id) return;
-    const container = document.querySelector('[data-live-photo]');
-    if (!container) return;
-    const img = container.querySelector('img[data-role="content-photo"]');
-    const tsEl = container.querySelector('[data-live-photo-ts]');
+  async function loadLatestDonorNote(pantry) {
+    if (!pantry || !pantry.id || !donorNotesState.root) return;
+    const container = donorNotesState.root;
+    container.innerHTML = '<div class="donor-note-empty">Loading…</div>';
     try {
       const items = await window.PantryAPI.getDonations(pantry.id, 1, 1);
-      if (Array.isArray(items) && items.length > 0) {
-        const latest = items[0];
-        const photos = latest.photoUrls || latest.photos || latest.images || [];
-        const photoUrl = Array.isArray(photos) ? photos[0] : photos;
-        if (photoUrl && img) {
-          img.src = photoUrl;
-        }
-        if (tsEl) {
-          const ts = latest.time || latest.createdAt || latest.updatedAt || latest.timestamp;
-          tsEl.textContent = ts ? formatRelativeTimestamp(ts) : 'Just now';
-        }
-        attachImageFallbacks(container);
-      } else if (tsEl) {
-        tsEl.textContent = 'No recent uploads';
-      }
+      const latest = Array.isArray(items) && items.length > 0 ? items[0] : null;
+      donorNotesState.latest = latest;
+      donorNotesState.pantryId = String(pantry.id);
+      renderLatestDonorNote(container, latest);
     } catch (error) {
-      console.error('Error loading latest live photo:', error);
-      if (tsEl) tsEl.textContent = 'Failed to load';
+      console.error('Error loading latest donor note:', error);
+      container.innerHTML = '<div class="donor-note-empty">Unable to load.</div>';
     }
   }
 
-  function bindLivePhotoUploader(root, pantry) {
-    if (!root) return;
-    const btn = root.querySelector('[data-live-photo-upload]');
-    if (!btn) return;
-    let input = root.querySelector('input[type="file"][data-live-photo-input]');
-    if (!input) {
-      input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'image/*';
-      input.style.display = 'none';
-      input.setAttribute('data-live-photo-input', 'true');
-      root.appendChild(input);
+  function renderLatestDonorNote(container, note) {
+    if (!container) return;
+    if (!note || (!(note.note && note.note.trim()) && !((note.photoUrls || note.photos || note.images || []).length))) {
+      container.innerHTML = '<div class="donor-note-empty">No donor notes yet.</div>';
+      return;
     }
-    btn.onclick = () => input.click();
-    input.onchange = (event) => {
-      const file = event.target.files && event.target.files[0];
-      if (file) {
-        console.log('Selected live pantry photo for upload', pantry.id, file);
-        // TODO: implement upload flow to backend
-      }
+    const text = (note.note || note.content || note.message || '').trim();
+    const photos = note.photoUrls || note.photos || note.images || [];
+    const photoUrl = Array.isArray(photos) ? photos[0] : (photos || null);
+    const createdAt = note.createdAt || note.updatedAt || note.time || note.timestamp || '';
+    const card = document.createElement('article');
+    card.className = 'donor-note-card';
+    let inner = '';
+    if (photoUrl) {
+      inner += `<div class="donor-note-media">${contentPhotoTag(photoUrl, 160, 'Donor note photo')}</div>`;
+    }
+    if (text) {
+      inner += `<p class="donor-note-text">${text.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`;
+    }
+    if (createdAt) {
+      inner += `<time class="donor-note-time" datetime="${createdAt}">${formatRelativeTimestamp(createdAt)}</time>`;
+    }
+    card.innerHTML = inner;
+    container.innerHTML = '';
+    container.appendChild(card);
+    attachImageFallbacks(container);
+  }
+
+  function openDonorNoteModal(pantry, onSuccess) {
+    const overlay = document.createElement('div');
+    overlay.className = 'donor-note-modal-overlay';
+    overlay.innerHTML = `
+      <div class="donor-note-modal" role="dialog" aria-modal="true" aria-labelledby="donor-note-modal-title">
+        <button type="button" class="donor-note-modal-close" aria-label="Close">×</button>
+        <h3 id="donor-note-modal-title">Add donor note</h3>
+        <p class="donor-note-modal-hint">Add a photo and/or text (at least one required).</p>
+        <form class="donor-note-form">
+          <label class="donor-note-photo-label">
+            <span>Photo (optional)</span>
+            <input type="file" name="photo" accept="image/*" />
+          </label>
+          <label>
+            <span>Note (optional)</span>
+            <textarea name="note" rows="3" placeholder="e.g. Dropped off canned goods"></textarea>
+          </label>
+          <div class="donor-note-modal-error" aria-live="polite"></div>
+          <div class="donor-note-modal-actions">
+            <button type="button" class="donor-note-modal-cancel">Cancel</button>
+            <button type="submit" class="donor-note-modal-submit">Add donor note</button>
+          </div>
+        </form>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    document.body.classList.add('modal-open');
+
+    const close = () => {
+      document.body.classList.remove('modal-open');
+      overlay.remove();
     };
+
+    overlay.querySelector('.donor-note-modal-close').onclick = close;
+    overlay.querySelector('.donor-note-modal-cancel').onclick = close;
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close();
+    });
+    overlay.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+      }
+    });
+
+    const form = overlay.querySelector('.donor-note-form');
+    const submitBtn = overlay.querySelector('.donor-note-modal-submit');
+    const errorEl = overlay.querySelector('.donor-note-modal-error');
+    const photoInput = form.querySelector('input[name="photo"]');
+    const noteInput = form.querySelector('textarea[name="note"]');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.textContent = '';
+      const note = (noteInput && noteInput.value) ? String(noteInput.value).trim() : '';
+      const file = photoInput && photoInput.files && photoInput.files[0];
+      if (!note && !file) {
+        errorEl.textContent = 'Please add a photo and/or text.';
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Adding…';
+
+      try {
+        let photoUrls = [];
+        if (file) {
+          const dataUrl = await readFileAsDataUrl(file);
+          if (dataUrl) photoUrls = [dataUrl];
+        }
+        await window.PantryAPI.postDonation(pantry.id, { note: note || undefined, photoUrls });
+        if (typeof onSuccess === 'function') await onSuccess();
+        close();
+      } catch (error) {
+        console.error('Error adding donor note:', error);
+        errorEl.textContent = 'Failed to add. Please try again.';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Add donor note';
+      }
+    });
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result || null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function bindDonorNotesModule(root, pantry) {
+    if (!root || !pantry || !pantry.id) return;
+    const latestEl = root.querySelector('[data-donor-notes-latest]');
+    const addBtn = root.querySelector('[data-donor-note-add]');
+    if (!latestEl || !addBtn) return;
+
+    donorNotesState.root = latestEl;
+    donorNotesState.pantryId = String(pantry.id);
+
+    addBtn.onclick = () => openDonorNoteModal(pantry, () => loadLatestDonorNote(pantry));
+    loadLatestDonorNote(pantry);
   }
 
   function bindWishlistModule(root, pantry) {
@@ -649,75 +749,37 @@
     const addBtn = root.querySelector('[data-wishlist-add]');
     if (!grid || !addBtn) return;
 
-    const refresh = (prefetched) => loadWishlist(pantry, grid, prefetched);
+    const refresh = () => loadWishlist(pantry, grid);
     addBtn.onclick = () => openWishlistModal(pantry, refresh);
     refresh();
   }
 
-  function normalizeItemName(value) {
-    if (value == null) return '';
-    return String(value).trim();
-  }
-
-  function aggregateWishlistItems(rawItems = []) {
-    if (!Array.isArray(rawItems)) return [];
-    const buckets = new Map();
-
-    rawItems.forEach((entry, index) => {
-      if (entry == null) return;
-      const candidate = typeof entry === 'string' ? { itemDisplay: entry, count: 1 } : entry;
-      const display = normalizeItemName(
-        candidate.itemDisplay ??
-          candidate.item ??
-          candidate.name ??
-          candidate.title ??
-          candidate.id
-      );
-      if (!display) return;
-      const key = normalizeItemName(display).toLowerCase();
-      if (!key) return;
-
-      const rawCount = Number(candidate.count ?? candidate.quantity ?? candidate.qty);
-      const count = Number.isFinite(rawCount) && rawCount > 0 ? rawCount : 1;
-      const updatedAt = candidate.updatedAt ?? candidate.modified ?? candidate.createdAt ?? candidate.timestamp ?? null;
-
-      const existing = buckets.get(key);
-      if (existing) {
-        existing.count += count;
-        if (!existing.updatedAt && updatedAt) {
-          existing.updatedAt = updatedAt;
-        }
-      } else {
-        buckets.set(key, {
-          id: candidate.id ?? `agg-${key || index}`,
-          itemDisplay: display,
-          count,
-          updatedAt: updatedAt ?? null,
-        });
-      }
-    });
-
-    return Array.from(buckets.values());
-  }
-
   function normalizeWishlistItems(rawItems = []) {
-    return aggregateWishlistItems(rawItems);
+    if (!Array.isArray(rawItems)) return [];
+    return rawItems
+      .map((entry, index) => {
+        if (!entry) return null;
+        const itemDisplay = String(entry.itemDisplay ?? entry.id ?? '').trim();
+        if (!itemDisplay) return null;
+        const parsedCount = Number(entry.count);
+        const count = Number.isFinite(parsedCount) && parsedCount > 0 ? parsedCount : 1;
+        return {
+          id: entry.id ?? `wishlist-${index}`,
+          itemDisplay,
+          count,
+          updatedAt: entry.updatedAt ?? entry.createdAt ?? null,
+        };
+      })
+      .filter(Boolean);
   }
 
-  function toWishlistArray(data) {
-    if (Array.isArray(data)) return data;
-    if (data && Array.isArray(data.items)) return data.items;
-    return [];
-  }
-
-  async function loadWishlist(pantry, grid, prefetchedData) {
-    if (!grid) return;
-    if (prefetchedData === undefined) {
-      grid.innerHTML = `<div class="wishlist-empty">Loading wishlist…</div>`;
-    }
+  async function loadWishlist(pantry, grid) {
+    grid.innerHTML = `<div class="wishlist-empty">Loading wishlist…</div>`;
     try {
-      const data = prefetchedData ?? (await window.PantryAPI.getWishlist(pantry.id));
-      let items = toWishlistArray(data);
+      const data = await window.PantryAPI.getWishlist(pantry.id);
+      let items = Array.isArray(data)
+        ? data
+        : (Array.isArray(data?.items) ? data.items : []);
       if ((!items || items.length === 0) && Array.isArray(pantry.wishlist) && pantry.wishlist.length) {
         items = pantry.wishlist.map((name, idx) => ({
           id: `legacy-${idx}`,
@@ -729,6 +791,8 @@
       const normalized = normalizeWishlistItems(items);
       wishlistState.items = normalized;
       wishlistState.pantryId = pantry.id;
+      wishlistState.root = grid;
+      grid.__items = normalized;
       renderWishlistItems(grid, normalized);
     } catch (error) {
       console.error('Error loading wishlist:', error);
@@ -745,7 +809,7 @@
     items.forEach(item => {
       const qty = Number.isFinite(item.count) && item.count > 0 ? item.count : 1; // Backend aggregates count
       const timestamp = item.updatedAt || item.createdAt || null; // Prefer freshest timestamp regardless of field name
-      const itemDisplay = normalizeItemName(item.itemDisplay ?? item.id ?? 'Item'); // Use backend agg label
+      const itemDisplay = String(item.itemDisplay ?? item.id ?? 'Item'); // Use backend agg label
       const pill = document.createElement('button');
       pill.type = 'button';
       pill.className = 'wishlist-chip';
@@ -755,10 +819,13 @@
         if (!wishlistState.pantryId) return;
         const pantryId = String(wishlistState.pantryId);
         try {
-          const updated = await window.PantryAPI.addWishlist(pantryId, itemDisplay, 1);
-          const refreshed = normalizeWishlistItems(toWishlistArray(updated)); // Merge duplicates after re-fetch
-          wishlistState.items = refreshed;
-          renderWishlistItems(grid, refreshed);
+          await window.PantryAPI.addWishlist(pantryId, itemDisplay, 1);
+          // Refresh from backend to get latest state
+          const data = await window.PantryAPI.getWishlist(pantryId);
+          const refreshed = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+          const normalized = normalizeWishlistItems(refreshed);
+          wishlistState.items = normalized;
+          renderWishlistItems(grid, normalized);
         } catch (err) {
           console.error('Error re-adding wishlist item:', err);
         }
@@ -776,24 +843,33 @@
       const data = await window.PantryAPI.getMessages(pantryId);
       const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
       messageState.items = items;
+      messageState.expanded = false;
       messageState.pantryId = pantryId;
-      renderMessages(items);
+      renderMessages();
     } catch (error) {
       console.error('Error loading messages:', error);
       container.innerHTML = `<div class="message-empty">Unable to load messages right now.</div>`;
     }
   }
 
-  function renderMessages(items) {
+  function renderMessages() {
     const container = messageState.root;
+    const toggleBtn = document.querySelector('[data-message-toggle]');
     if (!container) return;
+    const items = messageState.items || [];
     container.innerHTML = '';
     if (!Array.isArray(items) || items.length === 0) {
       container.innerHTML = `<div class="message-empty">No messages yet.</div>`;
+      if (toggleBtn) toggleBtn.hidden = true;
       return;
     }
 
-    items.forEach((msg) => {
+    const expanded = messageState.expanded === true;
+    const latestCount = 3;
+    const toShow = expanded ? items : items.slice(0, latestCount);
+    const hasMore = items.length > latestCount;
+
+    toShow.forEach((msg) => {
       const userName = (msg && (msg.userName || msg.name)) || 'Community member';
       const avatarUrl = msg?.userAvatar || msg?.avatarUrl || null;
       const content = msg?.content || msg?.message || '';
@@ -846,12 +922,22 @@
     });
 
     attachImageFallbacks(container);
+
+    if (toggleBtn) {
+      if (hasMore) {
+        toggleBtn.hidden = false;
+        toggleBtn.textContent = expanded ? 'Collapse' : `View more (${items.length - latestCount} more)`;
+      } else {
+        toggleBtn.hidden = true;
+      }
+    }
   }
 
   function bindMessageModule(root, pantry) {
     if (!root || !pantry || !pantry.id) return;
     const list = root.querySelector('[data-message-list]');
     const addBtn = root.querySelector('[data-message-add]');
+    const toggleBtn = root.querySelector('[data-message-toggle]');
     if (!list || !addBtn) return;
 
     messageState.root = list;
@@ -875,6 +961,13 @@
         window.alert('Failed to post message. Please try again.');
       }
     };
+
+    if (toggleBtn) {
+      toggleBtn.onclick = () => {
+        messageState.expanded = !messageState.expanded;
+        renderMessages();
+      };
+    }
 
     loadMessages(pantry);
   }
@@ -944,8 +1037,8 @@
       submitBtn.textContent = 'Adding…';
 
       try {
-        const updated = await window.PantryAPI.addWishlist(pantry.id, item, quantity);
-        if (typeof onSuccess === 'function') await onSuccess(updated); // Re-fetch wishlist immediately after add
+        await window.PantryAPI.addWishlist(pantry.id, item, quantity);
+        if (typeof onSuccess === 'function') await onSuccess(); // Re-fetch wishlist immediately after add
         close();
       } catch (error) {
         console.error('Error creating wishlist item:', error);
