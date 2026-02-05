@@ -325,11 +325,7 @@
       console.info('[PantryAPI] Using backend pantries payload', normalized.length);
       return normalized;
     } catch (error) {
-      if (!isNetworkError(error)) {
-        console.error('[PantryAPI] Failed to load pantries from backend', error);
-        throw error;
-      }
-      console.warn('[PantryAPI] Backend unreachable, falling back to static pantries.json');
+      console.warn('[PantryAPI] Backend error, falling back to static pantries.json', error);
       const normalized = await loadFallbackPantries();
       console.info('[PantryAPI] Using fallback pantries payload', normalized.length);
       return normalized;
@@ -347,11 +343,7 @@
       console.info('[PantryAPI] Using backend pantry detail', backendId);
       return normalizePantry(pantry);
     } catch (error) {
-      if (!isNetworkError(error)) {
-        console.error('[PantryAPI] Failed to load pantry from backend', error);
-        throw error;
-      }
-      console.warn('[PantryAPI] Backend unreachable when fetching pantry, using static fallback.');
+      console.warn('[PantryAPI] Backend error when fetching pantry, using static fallback.', error);
       const fallback = await loadFallbackPantryById(backendId);
       if (!fallback) throw error;
       return fallback;
