@@ -374,103 +374,111 @@ document.addEventListener('DOMContentLoaded', function() {
 
   function renderInventoryCategories(pantry){ const root=document.getElementById('inventoryCategories'); if(!root) return; const cats = pantry.inventory?.categories||[]; if(cats.length===0){ root.innerHTML='<div class="empty">No inventory categories.</div>'; return; } root.innerHTML = `<ul>${cats.map(c=>`<li>${escapeHtml(c.name||'Unknown')}: ${Number(c.quantity||0)}</li>`).join('')}</ul>`; }
 
-  // Wish list (localStorage)
-  function getWishlistKey(pantryId){ return `wishlist_${pantryId}`; }
-  function loadWishlist(pantryId){ try{ const s=localStorage.getItem(getWishlistKey(pantryId)); return s?JSON.parse(s):[]; }catch(e){return[];} }
-  function saveWishlist(pantryId, items){ try{ localStorage.setItem(getWishlistKey(pantryId), JSON.stringify(items)); }catch(e){} }
+  // Wish list - now uses backend API (PantryAPI) for integration with main page
+  // Cache for wishlist items to avoid repeated API calls
+  let wishlistCache = { pantryId: null, items: [] };
 
-  // Seed 8 sample receiver requests if wishlist is empty
-  function seedSampleRequests(pantryId){
-    const existing = loadWishlist(pantryId);
-    if (existing.length > 0) return;
-    const samples = [
-      { item:'Canned Vegetables', quantity:5, requester:'Maria G.' },
-      { item:'Rice (5 lb bag)', quantity:3, requester:'James L.' },
-      { item:'Baby Formula', quantity:2, requester:'Sarah K.' },
-      { item:'Peanut Butter', quantity:4, requester:'David W.' },
-      { item:'Pasta & Sauce', quantity:6, requester:'Lin C.' },
-      { item:'Canned Tuna', quantity:4, requester:'Ahmed R.' },
-      { item:'Diapers (Size 3)', quantity:2, requester:'Jessica M.' },
-      { item:'Cooking Oil', quantity:3, requester:'Tom H.' }
-    ];
-    const now = Date.now();
-    const items = samples.map((s, i) => ({
-      id: `req_${now}_${i}`,
-      item: s.item,
-      quantity: s.quantity,
-      requester: s.requester,
-      status: 'pending',
-      createdAt: new Date(now - (i * 3600000 * 12 + Math.random() * 3600000 * 24)).toISOString()
-    }));
-    saveWishlist(pantryId, items);
+  // Normalize backend wishlist items to UI-friendly format
+  function normalizeWishlistItem(entry, index) {
+    if (!entry) return null;
+    // Backend returns: { id, itemDisplay, count, updatedAt, createdAt }
+    // We map to: { id, item, quantity, requester, status, createdAt }
+    const itemDisplay = String(entry.itemDisplay ?? entry.item ?? entry.id ?? '').trim();
+    if (!itemDisplay) return null;
+    const parsedCount = Number(entry.count ?? entry.quantity);
+    const count = Number.isFinite(parsedCount) && parsedCount > 0 ? parsedCount : 1;
+    return {
+      id: entry.id ?? `wishlist-${index}`,
+      item: itemDisplay,
+      quantity: count,
+      requester: entry.requester || 'Community',
+      status: entry.status || 'pending',
+      createdAt: entry.createdAt ?? entry.updatedAt ?? null,
+      updatedAt: entry.updatedAt ?? entry.createdAt ?? null,
+    };
   }
 
-  function renderWishlist(pantryId){
+  // Load wishlist from backend API
+  async function loadWishlistFromAPI(pantryId) {
+    if (!pantryId) return [];
+    try {
+      const data = await window.PantryAPI.getWishlist(pantryId);
+      const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+      const normalized = items.map((item, idx) => normalizeWishlistItem(item, idx)).filter(Boolean);
+      wishlistCache = { pantryId: String(pantryId), items: normalized };
+      return normalized;
+    } catch (e) {
+      console.error('Error loading wishlist from API:', e);
+      return wishlistCache.pantryId === String(pantryId) ? wishlistCache.items : [];
+    }
+  }
+
+  // Add item to wishlist via backend API
+  async function addWishlistItemToAPI(pantryId, item, quantity) {
+    if (!pantryId || !item) return;
+    try {
+      await window.PantryAPI.addWishlistItem(pantryId, item, quantity);
+    } catch (e) {
+      console.error('Error adding wishlist item:', e);
+      throw e;
+    }
+  }
+
+  // Render wishlist - now async since it loads from API
+  async function renderWishlist(pantryId) {
     const root = document.getElementById('mp-wishlist');
     if (!root) return;
-    const items = loadWishlist(pantryId);
+
+    // Show loading state
+    root.innerHTML = '<div class="wishlist-empty">Loading wishlist...</div>';
+
+    // Load from backend API
+    const items = await loadWishlistFromAPI(pantryId);
 
     // Update counter badge
     const pendingCount = items.filter(x => x.status === 'pending').length;
-    const donatedCount = items.filter(x => x.status === 'donated').length;
+    const totalCount = items.length;
     const counterEl = document.getElementById('wishlist-counter');
     if (counterEl) {
-      counterEl.innerHTML = `<span class="wl-count pending">${pendingCount} pending</span><span class="wl-count donated">${donatedCount} donated</span>`;
+      counterEl.innerHTML = `<span class="wl-count pending">${totalCount} items</span><span class="wl-count donated">${pendingCount} requested</span>`;
     }
 
     if (items.length === 0) {
-      root.innerHTML = '<div class="wishlist-empty">No requests from receivers yet.</div>';
+      root.innerHTML = '<div class="wishlist-empty">No wishlist items yet. Items added on the main map page will appear here.</div>';
       return;
     }
 
-    // Sort: pending first, then donated
+    // Sort by most recent first
     const sorted = items.slice().sort((a, b) => {
-      if (a.status === 'pending' && b.status !== 'pending') return -1;
-      if (a.status !== 'pending' && b.status === 'pending') return 1;
-      return new Date(b.createdAt) - new Date(a.createdAt);
+      return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0);
     });
 
     root.innerHTML = `<div class="wishlist-grid">${sorted.map(it => {
-      const isPending = it.status === 'pending';
-      const statusClass = isPending ? 'pending' : 'donated';
-      return `<div class="wishlist-item-card ${statusClass}">
+      const qtyDisplay = it.quantity > 1 ? ` × ${it.quantity}` : '';
+      return `<div class="wishlist-item-card pending">
         <div class="wishlist-item-info">
-          <div class="wishlist-item-name">${escapeHtml(it.item)}</div>
-          <div class="wishlist-item-meta">Qty: ${it.quantity || 1} · From: ${escapeHtml(it.requester || 'Anonymous')} · ${it.createdAt ? formatDateTimeMinutes(it.createdAt) : ''}</div>
+          <div class="wishlist-item-name">${escapeHtml(it.item)}${qtyDisplay}</div>
+          <div class="wishlist-item-meta">Requested by: ${escapeHtml(it.requester || 'Community')} · ${it.updatedAt ? formatDateTimeMinutes(it.updatedAt) : ''}</div>
         </div>
         <div class="wishlist-actions">
-          ${isPending
-            ? `<button class="wl-mark-btn mark-donated" data-id="${it.id}">Donated</button><button class="wl-mark-btn mark-pending-still" data-id="${it.id}">Not Yet</button>`
-            : `<span class="wl-donated-label">Donated</span><button class="wl-remove-btn" data-id="${it.id}" title="Remove">&times;</button>`
-          }
+          <button class="wl-mark-btn wl-add-more" data-item="${escapeHtml(it.item)}" title="Add one more request">+1</button>
         </div>
       </div>`;
     }).join('')}</div>`;
 
-    // "Donated" button — mark as donated
-    root.querySelectorAll('.mark-donated').forEach(btn => btn.addEventListener('click', () => {
-      const id = btn.getAttribute('data-id');
-      const it = items.find(x => x.id === id);
-      if (!it) return;
-      it.status = 'donated';
-      it.fulfilledAt = new Date().toISOString();
-      saveWishlist(pantryId, items);
-      renderWishlist(pantryId);
-    }));
-
-    // "Not Yet" button — keep as pending (visual feedback only)
-    root.querySelectorAll('.mark-pending-still').forEach(btn => btn.addEventListener('click', () => {
-      btn.textContent = 'Noted';
+    // "+1" button — add one more of the same item
+    root.querySelectorAll('.wl-add-more').forEach(btn => btn.addEventListener('click', async () => {
+      const itemName = btn.getAttribute('data-item');
+      if (!itemName) return;
       btn.disabled = true;
-      setTimeout(() => { btn.textContent = 'Not Yet'; btn.disabled = false; }, 1200);
-    }));
-
-    // Remove button (only on donated items)
-    root.querySelectorAll('.wl-remove-btn').forEach(btn => btn.addEventListener('click', () => {
-      const id = btn.getAttribute('data-id');
-      const filtered = items.filter(x => x.id !== id);
-      saveWishlist(pantryId, filtered);
-      renderWishlist(pantryId);
+      btn.textContent = '...';
+      try {
+        await addWishlistItemToAPI(pantryId, itemName, 1);
+        await renderWishlist(pantryId);
+      } catch (e) {
+        btn.textContent = '!';
+        setTimeout(() => { btn.textContent = '+1'; btn.disabled = false; }, 1500);
+      }
     }));
   }
 
@@ -909,10 +917,25 @@ document.addEventListener('DOMContentLoaded', function() {
     renderStatusCards(pantry);
     renderInventoryCategories(pantry);
 
-    // wishlist — seed sample data then render
-    seedSampleRequests(pantry.id);
-    renderWishlist(pantry.id);
-    document.getElementById('mp-wishlist-add')?.addEventListener('click', ()=>{ const name = prompt('Item name requested:'); if(!name) return; const qty = parseInt(prompt('Quantity needed:', '1'), 10) || 1; const requester = prompt('Requester name (optional):', '') || 'Anonymous'; const items = loadWishlist(pantry.id); const newItem = { id:`req_${Date.now()}`, item: name, quantity: qty, requester: requester, status:'pending', createdAt: new Date().toISOString() }; items.push(newItem); saveWishlist(pantry.id, items); renderWishlist(pantry.id); });
+    // wishlist — now integrated with backend API (shared with main page)
+    await renderWishlist(pantry.id);
+    document.getElementById('mp-wishlist-add')?.addEventListener('click', async () => {
+      const name = prompt('Item name requested:');
+      if (!name || !name.trim()) return;
+      const qty = parseInt(prompt('Quantity needed:', '1'), 10) || 1;
+      const btn = document.getElementById('mp-wishlist-add');
+      if (btn) { btn.disabled = true; btn.textContent = 'Adding...'; }
+      try {
+        await addWishlistItemToAPI(pantry.id, name.trim(), qty);
+        await renderWishlist(pantry.id);
+        showToast('Item added to wishlist');
+      } catch (e) {
+        console.error('Failed to add wishlist item:', e);
+        showToast('Failed to add item');
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '+ Add Request'; }
+      }
+    });
 
     // initialize mini map preview (if location present)
     setupMiniMap(pantry);
