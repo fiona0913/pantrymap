@@ -1,4 +1,14 @@
-// my-pantry.js - 终极修复版 (适配 dashboard_data.json)
+// my-pantry.js - Enhanced with List View and Detail View
+// ========================================================
+
+// Global state for view management
+let currentView = 'list'; // 'list' or 'detail'
+let selectedPantry = null;
+let allPantries = [];
+let filteredPantries = [];
+
+// Placeholder image for pantries without photos
+const PANTRY_PLACEHOLDER = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200" viewBox="0 0 400 200"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop offset="0%" stop-color="%23f0fdf4"/><stop offset="100%" stop-color="%23dcfce7"/></linearGradient></defs><rect width="400" height="200" fill="url(%23g)"/><text x="200" y="110" text-anchor="middle" font-family="system-ui" font-size="18" fill="%2352b788" opacity="0.7">Pantry</text></svg>';
 
 // 1. 直接把 dashboard_data.json 的内容粘贴在这里 (绕过所有文件读取问题)
 const fallbackData = {
@@ -27,14 +37,330 @@ const fallbackData = {
   }
 };
 
+// ========================================================
+// PANTRY LIST VIEW FUNCTIONS
+// ========================================================
+
+// Load all pantries from API or JSON file
+async function loadAllPantries() {
+  try {
+    // Try API first
+    if (window.PantryAPI && window.PantryAPI.getPantries) {
+      const pantries = await window.PantryAPI.getPantries();
+      if (Array.isArray(pantries) && pantries.length > 0) {
+        return pantries;
+      }
+    }
+    // Fallback to local JSON
+    const resp = await fetch('./pantries.json');
+    const pantries = await resp.json();
+    return Array.isArray(pantries) ? pantries : [];
+  } catch (e) {
+    console.warn('Failed to load pantries:', e);
+    return [];
+  }
+}
+
+// Calculate stock level from inventory
+function calculateStockLevel(pantry) {
+  const categories = pantry.inventory?.categories || [];
+  const total = categories.reduce((sum, cat) => sum + (cat.quantity || 0), 0);
+  const capacity = 40; // default capacity
+  const ratio = Math.min(total / capacity, 1);
+
+  if (ratio >= 0.6) return { level: 'high', label: 'High', total, ratio };
+  if (ratio >= 0.3) return { level: 'medium', label: 'Medium', total, ratio };
+  return { level: 'low', label: 'Low', total, ratio };
+}
+
+// Render a single pantry card
+function renderPantryCard(pantry) {
+  const stock = calculateStockLevel(pantry);
+  const photoUrl = (pantry.photos && pantry.photos[0]) || PANTRY_PLACEHOLDER;
+  const status = pantry.status || 'open';
+  const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+  const address = pantry.address || 'Address not available';
+  const lastUpdated = pantry.sensors?.updatedAt
+    ? new Date(pantry.sensors.updatedAt).toLocaleDateString()
+    : 'N/A';
+
+  // Check if the photo URL is valid (not placeholder or empty)
+  const hasValidPhoto = photoUrl && photoUrl !== PANTRY_PLACEHOLDER && !photoUrl.startsWith('data:');
+
+  return `
+    <div class="mp-pantry-card" data-pantry-id="${pantry.id}">
+      ${hasValidPhoto
+        ? `<img class="mp-pantry-card-image" src="${escapeHtmlGlobal(photoUrl)}" alt="${escapeHtmlGlobal(pantry.name || 'Pantry')}" onerror="this.onerror=null; this.style.display='none'; this.nextElementSibling.style.display='flex';" /><div class="mp-pantry-card-image-placeholder" style="display:none;">No Image</div>`
+        : `<div class="mp-pantry-card-image-placeholder">No Image</div>`
+      }
+      <div class="mp-pantry-card-body">
+        <div class="mp-pantry-card-header">
+          <h3 class="mp-pantry-card-title">${escapeHtmlGlobal(pantry.name || 'Untitled Pantry')}</h3>
+          <span class="mp-pantry-card-status ${status}">${statusLabel}</span>
+        </div>
+        <div class="mp-pantry-card-address">
+          <i class="fa-solid fa-location-dot"></i>
+          <span>${escapeHtmlGlobal(address)}</span>
+        </div>
+        <div class="mp-pantry-card-stats">
+          <div class="mp-stat">
+            <span class="mp-stat-label">Stock Level</span>
+            <div class="mp-stock-gauge-mini">
+              <div class="mp-stock-bar">
+                <div class="mp-stock-bar-fill ${stock.level}" style="width: ${stock.ratio * 100}%"></div>
+              </div>
+              <span class="mp-stat-value ${stock.level}">${stock.label}</span>
+            </div>
+          </div>
+          <div class="mp-stat">
+            <span class="mp-stat-label">Items</span>
+            <span class="mp-stat-value">${stock.total}</span>
+          </div>
+          <div class="mp-stat">
+            <span class="mp-stat-label">Updated</span>
+            <span class="mp-stat-value">${lastUpdated}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// Render the pantry list
+function renderPantryList(pantries) {
+  const listContainer = document.getElementById('mp-pantry-list');
+  if (!listContainer) return;
+
+  if (!pantries || pantries.length === 0) {
+    listContainer.innerHTML = `
+      <div class="mp-empty-state">
+        <div class="mp-empty-state-icon">📦</div>
+        <div class="mp-empty-state-text">No pantries found</div>
+        <div class="mp-empty-state-hint">Try adjusting your filters or check back later</div>
+      </div>
+    `;
+    return;
+  }
+
+  listContainer.innerHTML = pantries.map(p => renderPantryCard(p)).join('');
+
+  // Add click handlers to cards
+  listContainer.querySelectorAll('.mp-pantry-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const pantryId = card.getAttribute('data-pantry-id');
+      const pantry = allPantries.find(p => String(p.id) === String(pantryId));
+      if (pantry) {
+        showPantryDetail(pantry);
+      }
+    });
+  });
+}
+
+// Filter pantries based on search and filters
+function filterPantries() {
+  const searchInput = document.getElementById('mp-search');
+  const statusFilter = document.getElementById('mp-filter-status');
+  const stockFilter = document.getElementById('mp-filter-stock');
+
+  const searchTerm = (searchInput?.value || '').toLowerCase().trim();
+  const statusValue = statusFilter?.value || 'all';
+  const stockValue = stockFilter?.value || 'all';
+
+  filteredPantries = allPantries.filter(pantry => {
+    // Search filter
+    if (searchTerm) {
+      const name = (pantry.name || '').toLowerCase();
+      const address = (pantry.address || '').toLowerCase();
+      if (!name.includes(searchTerm) && !address.includes(searchTerm)) {
+        return false;
+      }
+    }
+
+    // Status filter
+    if (statusValue !== 'all') {
+      const status = (pantry.status || 'open').toLowerCase();
+      if (status !== statusValue) return false;
+    }
+
+    // Stock filter
+    if (stockValue !== 'all') {
+      const stock = calculateStockLevel(pantry);
+      if (stock.level !== stockValue) return false;
+    }
+
+    return true;
+  });
+
+  renderPantryList(filteredPantries);
+}
+
+// Show list view
+function showListView() {
+  currentView = 'list';
+  selectedPantry = null;
+
+  const listView = document.getElementById('pantry-list-view');
+  const detailView = document.getElementById('pantry-detail-view');
+
+  if (listView) listView.style.display = 'block';
+  if (detailView) detailView.style.display = 'none';
+
+  // Update URL without pantryId
+  const url = new URL(window.location.href);
+  url.searchParams.delete('pantryId');
+  window.history.pushState({}, '', url);
+}
+
+// Show pantry detail view
+function showPantryDetail(pantry) {
+  currentView = 'detail';
+  selectedPantry = pantry;
+
+  const listView = document.getElementById('pantry-list-view');
+  const detailView = document.getElementById('pantry-detail-view');
+
+  if (listView) listView.style.display = 'none';
+  if (detailView) detailView.style.display = 'block';
+
+  // Update URL with pantryId
+  const url = new URL(window.location.href);
+  url.searchParams.set('pantryId', pantry.id);
+  window.history.pushState({}, '', url);
+
+  // Initialize detail view with selected pantry
+  initDetailView(pantry);
+}
+
+// Initialize the list view
+async function initListView() {
+  const listContainer = document.getElementById('mp-pantry-list');
+  if (listContainer) {
+    listContainer.innerHTML = '<div class="mp-loading">Loading your pantries...</div>';
+  }
+
+  // Load pantries
+  allPantries = await loadAllPantries();
+  filteredPantries = allPantries;
+  renderPantryList(filteredPantries);
+
+  // Setup filter event listeners
+  const searchInput = document.getElementById('mp-search');
+  const statusFilter = document.getElementById('mp-filter-status');
+  const stockFilter = document.getElementById('mp-filter-stock');
+
+  if (searchInput) {
+    searchInput.addEventListener('input', debounce(filterPantries, 300));
+  }
+  if (statusFilter) {
+    statusFilter.addEventListener('change', filterPantries);
+  }
+  if (stockFilter) {
+    stockFilter.addEventListener('change', filterPantries);
+  }
+
+  // Setup back button
+  const backBtn = document.getElementById('mp-back-to-list');
+  if (backBtn) {
+    backBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      showListView();
+    });
+  }
+}
+
+// Debounce helper
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
+
+// Global escapeHtml function
+function escapeHtmlGlobal(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+// Initialize detail view with a specific pantry
+async function initDetailView(pantry) {
+  if (!pantry) return;
+
+  // Apply any saved local settings
+  applySavedSettingsToPantryGlobal(pantry);
+
+  // Update title and subtitle
+  const titleEl = document.getElementById('pantryTitle');
+  const subtitleEl = document.getElementById('pantrySubtitle');
+  if (titleEl) titleEl.textContent = pantry.name || 'My Pantry';
+  if (subtitleEl) subtitleEl.textContent = pantry.address || '';
+
+  // Render detail sections (these will be called from within the IIFE)
+  if (typeof window._renderBasicInfo === 'function') window._renderBasicInfo(pantry);
+  if (typeof window._renderStatusCards === 'function') window._renderStatusCards(pantry);
+  if (typeof window._renderInventoryCategories === 'function') window._renderInventoryCategories(pantry);
+  if (typeof window._renderWishlist === 'function') await window._renderWishlist(pantry.id);
+  if (typeof window._setupMiniMap === 'function') window._setupMiniMap(pantry);
+  if (typeof window._renderActivities === 'function') {
+    const activities = window._getActivitiesByPantryId ? window._getActivitiesByPantryId(pantry.id) : [];
+    window._renderActivities(activities);
+  }
+  if (typeof window._initSettingsSection === 'function') window._initSettingsSection(pantry);
+
+  // Load sensor data
+  if (typeof window._loadBeaconCSVAndRender === 'function') {
+    try { await window._loadBeaconCSVAndRender('BeaconHill_2026-01-22_to_2026-01-29.csv'); } catch(e) {}
+  }
+
+  // Reset tabs to overview
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  const overviewTab = document.querySelector('.tab[data-tab="overview"]');
+  const overviewPanel = document.getElementById('tab-overview');
+  if (overviewTab) overviewTab.classList.add('active');
+  if (overviewPanel) overviewPanel.classList.add('active');
+}
+
+// Helper to apply saved settings (called from outside IIFE)
+function applySavedSettingsToPantryGlobal(pantry) {
+  if (!pantry || !pantry.id) return;
+  try {
+    const key = `pantry_settings_${pantry.id}`;
+    const s = localStorage.getItem(key);
+    if (!s) return;
+    const settings = JSON.parse(s);
+    if (settings.name) pantry.name = settings.name;
+    if (settings.address) pantry.address = settings.address;
+    if (settings.description) pantry.description = settings.description;
+    if (settings.contact) pantry.contact = Object.assign({}, pantry.contact || {}, settings.contact);
+    if (settings.notifications) pantry.notifications = settings.notifications;
+    if (settings.deactivated) pantry.deactivated = settings.deactivated;
+  } catch(e) {}
+}
+
+// ========================================================
+// END PANTRY LIST VIEW FUNCTIONS
+// ========================================================
+
 // 2. Render function — maps dashboard_data.json (modules structure) to UI
 function applyPantryDataToUI(data) {
     if (!data || !data.modules) return;
 
-    // --- A. Title ---
-    const titleEl = document.querySelector('.mp-title');
-    if (titleEl && data.modules.persona && data.modules.persona.name) {
-        titleEl.innerText = data.modules.persona.name;
+    // --- A. Title --- Only update if in detail view (check if detail view is visible)
+    // Don't overwrite the list view title
+    const detailView = document.getElementById('pantry-detail-view');
+    const isDetailViewVisible = detailView && detailView.style.display !== 'none';
+    if (isDetailViewVisible) {
+        const titleEl = document.getElementById('pantryTitle');
+        if (titleEl && data.modules.persona && data.modules.persona.name) {
+            titleEl.innerText = data.modules.persona.name;
+        }
     }
 
     // --- B. Status Cards (Weight / Temperature / Battery) ---
@@ -906,28 +1232,47 @@ document.addEventListener('DOMContentLoaded', function() {
     return { activitySummary, weightTrendData: data, doorEventsList, opens: opens, closes: closes, timeRange: timeRange, parsedRows: data.length };
   }
 
-  async function init(){
-    const pantryId = getQueryParam('pantryId') || '';
-    const pantry = await loadPantry(pantryId) || {};
-    // apply any saved local settings (name, description, contact, notifications)
-    applySavedSettingsToPantry(pantry);
-    document.getElementById('pantryTitle').textContent = `My Pantry - ${pantry.name||'Untitled'}`;
-    document.getElementById('pantrySubtitle').textContent = pantry.address || '';
-    renderBasicInfo(pantry);
-    renderStatusCards(pantry);
-    renderInventoryCategories(pantry);
+  // Expose functions to window for external access (used by initDetailView)
+  window._renderBasicInfo = renderBasicInfo;
+  window._renderStatusCards = renderStatusCards;
+  window._renderInventoryCategories = renderInventoryCategories;
+  window._renderWishlist = renderWishlist;
+  window._setupMiniMap = setupMiniMap;
+  window._renderActivities = renderActivities;
+  window._getActivitiesByPantryId = getActivitiesByPantryId;
+  window._initSettingsSection = initSettingsSection;
+  window._loadBeaconCSVAndRender = loadBeaconCSVAndRender;
+  window._addWishlistItemToAPI = addWishlistItemToAPI;
+  window._showToast = showToast;
+  window._loadPantry = loadPantry;
 
-    // wishlist — now integrated with backend API (shared with main page)
-    await renderWishlist(pantry.id);
+  async function init(){
+    // Check if pantryId is in URL - if so, show detail view directly
+    const pantryId = getQueryParam('pantryId') || '';
+
+    // Initialize list view first (always needed for navigation)
+    await initListView();
+
+    // Setup tab switching
+    document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+      const name = btn.getAttribute('data-tab');
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('tab-' + name)?.classList.add('active');
+    }));
+
+    // Setup wishlist add button handler
     document.getElementById('mp-wishlist-add')?.addEventListener('click', async () => {
+      if (!selectedPantry) return;
       const name = prompt('Item name requested:');
       if (!name || !name.trim()) return;
       const qty = parseInt(prompt('Quantity needed:', '1'), 10) || 1;
       const btn = document.getElementById('mp-wishlist-add');
       if (btn) { btn.disabled = true; btn.textContent = 'Adding...'; }
       try {
-        await addWishlistItemToAPI(pantry.id, name.trim(), qty);
-        await renderWishlist(pantry.id);
+        await addWishlistItemToAPI(selectedPantry.id, name.trim(), qty);
+        await renderWishlist(selectedPantry.id);
         showToast('Item added to wishlist');
       } catch (e) {
         console.error('Failed to add wishlist item:', e);
@@ -937,20 +1282,7 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     });
 
-    // initialize mini map preview (if location present)
-    setupMiniMap(pantry);
-
-    // load and render activity records (mocked)
-    const activities = getActivitiesByPantryId(pantry.id);
-    renderActivities(activities);
-
-    // initialize settings UI (name/description/contact, toggles, danger actions)
-    try{ initSettingsSection(pantry); }catch(e){}
-
-    // Load CSV sensor data for weight trend & door activity (Sensors tab)
-    try{ await loadBeaconCSVAndRender('BeaconHill_2026-01-22_to_2026-01-29.csv'); }catch(e){}
-
-    // Wire up time filter for Sensors tab — always attach, even if CSV had issues
+    // Wire up time filter for Sensors tab
     const timeFilter = document.getElementById('mpTimeFilter');
     if (timeFilter) {
       timeFilter.addEventListener('change', function() {
@@ -958,12 +1290,26 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     }
 
-    // Apply dashboard_data.json last — title, stockLevel, temperature, battery, activity feed
-    try{ loadAndApplyDashboard(); }catch(e){}
+    // If pantryId is provided in URL, show detail view for that pantry
+    if (pantryId) {
+      const pantry = await loadPantry(pantryId);
+      if (pantry) {
+        showPantryDetail(pantry);
+      }
+    }
 
-    // Tab switching
-    document.querySelectorAll('.tab').forEach(btn=> btn.addEventListener('click', (e)=>{ document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); btn.classList.add('active'); const name = btn.getAttribute('data-tab'); document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active')); document.getElementById('tab-'+name).classList.add('active'); }));
-
+    // Handle browser back/forward buttons
+    window.addEventListener('popstate', async () => {
+      const newPantryId = getQueryParam('pantryId');
+      if (newPantryId) {
+        const pantry = allPantries.find(p => String(p.id) === String(newPantryId));
+        if (pantry) {
+          showPantryDetail(pantry);
+        }
+      } else {
+        showListView();
+      }
+    });
   }
 
   function generateSampleTelemetry(){ const now = Date.now(); const weight=[]; let base = 50 + Math.floor(Math.random()*40); for(let i=24;i>=0;i--){ const ts=new Date(now - i*60*60*1000).toISOString(); if(Math.random()<0.08) base+=5+Math.random()*8; else base += (Math.random() * -1.2); weight.push({ts, weightKg: Number(Math.max(3, base).toFixed(2))}); } const doors=[]; for(let hoursAgo=48; hoursAgo>=0; hoursAgo -= (3 + Math.floor(Math.random()*4))){ const openTs = new Date(now - hoursAgo*60*60*1000).toISOString(); doors.push({ts: openTs, status: 'open'}); const closeOffsetMin = 2 + Math.floor(Math.random()*30); const closeTs = new Date(Date.parse(openTs) + closeOffsetMin*60*1000).toISOString(); doors.push({ts: closeTs, status: 'closed'}); } weight.sort((a,b)=>new Date(a.ts)-new Date(b.ts)); doors.sort((a,b)=>new Date(a.ts)-new Date(b.ts)); return {weight,doors}; }

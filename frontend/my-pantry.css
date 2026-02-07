@@ -467,3 +467,334 @@ circle.weight-point.highlight { stroke: #ff9800; stroke-width: 2; }
 
 .visually-hidden { position: absolute !important; height: 1px; width: 1px; overflow: hidden; clip: rect(1px, 1px, 1px, 1px); white-space: nowrap; }
 
+/* ========================================
+   MY PANTRY LIST VIEW STYLES
+   ======================================== */
+
+/* View Container */
+.mp-view {
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* List Controls */
+.mp-list-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.mp-search-wrap {
+  flex: 1;
+  min-width: 240px;
+  position: relative;
+}
+
+.mp-search-wrap i {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--mp-muted);
+  font-size: 14px;
+}
+
+.mp-search-input {
+  width: 100%;
+  padding: 12px 14px 12px 42px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 14px;
+  background: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.mp-search-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(82, 183, 136, 0.1);
+}
+
+.mp-filter-controls {
+  display: flex;
+  gap: 12px;
+}
+
+.mp-filter-select {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 14px;
+  background: #fff;
+  cursor: pointer;
+  min-width: 140px;
+}
+
+.mp-filter-select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+/* Pantry Grid */
+.mp-pantry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px;
+}
+
+@media (max-width: 700px) {
+  .mp-pantry-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Pantry Card */
+.mp-pantry-card {
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+  display: flex;
+  flex-direction: column;
+}
+
+.mp-pantry-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.1);
+  border-color: var(--primary);
+}
+
+.mp-pantry-card-image {
+  width: 100%;
+  height: 160px;
+  object-fit: cover;
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+}
+
+/* Placeholder when image fails to load */
+.mp-pantry-card-image-placeholder {
+  width: 100%;
+  height: 160px;
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #52b788;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.mp-pantry-card-body {
+  padding: 16px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.mp-pantry-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.mp-pantry-card-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.mp-pantry-card-status {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.mp-pantry-card-status.open {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.mp-pantry-card-status.closed {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.mp-pantry-card-status.low-inventory {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.mp-pantry-card-address {
+  font-size: 13px;
+  color: var(--mp-muted);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.mp-pantry-card-address i {
+  margin-top: 2px;
+  color: var(--primary);
+}
+
+.mp-pantry-card-stats {
+  display: flex;
+  gap: 16px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.mp-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mp-stat-label {
+  font-size: 11px;
+  color: var(--mp-muted);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.mp-stat-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.mp-stat-value.low { color: #dc2626; }
+.mp-stat-value.medium { color: #d97706; }
+.mp-stat-value.high { color: #16a34a; }
+
+/* Stock Gauge Mini */
+.mp-stock-gauge-mini {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mp-stock-bar {
+  flex: 1;
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.mp-stock-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.mp-stock-bar-fill.low { background: linear-gradient(90deg, #ef4444, #f87171); }
+.mp-stock-bar-fill.medium { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.mp-stock-bar-fill.high { background: linear-gradient(90deg, #22c55e, #4ade80); }
+
+/* Empty State */
+.mp-empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--mp-muted);
+}
+
+.mp-empty-state-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.mp-empty-state-text {
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+.mp-empty-state-hint {
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+/* Loading State */
+.mp-loading {
+  text-align: center;
+  padding: 40px;
+  color: var(--mp-muted);
+  font-size: 14px;
+}
+
+/* Pantry Card Footer Actions */
+.mp-pantry-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.mp-card-action-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: #fff;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.mp-card-action-btn:hover {
+  background: #f8fafc;
+  border-color: var(--primary);
+}
+
+.mp-card-action-btn.primary {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.mp-card-action-btn.primary:hover {
+  background: #3da87a;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  .mp-list-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .mp-search-wrap {
+    min-width: 100%;
+  }
+
+  .mp-filter-controls {
+    flex-wrap: wrap;
+  }
+
+  .mp-filter-select {
+    flex: 1;
+    min-width: 120px;
+  }
+}
+

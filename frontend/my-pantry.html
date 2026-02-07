@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>My Pantry — Sensor History</title>
+    <title>My Pantries — PantryMap</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
@@ -46,21 +46,60 @@
 
       <main class="layout" style="align-items: flex-start;">
         <div style="flex:1; padding: 28px; max-width: 1200px; margin: 0 auto;">
-          <header class="mp-header history-header">
-            <a href="index.html" class="back-link mp-back"><i class="fa-solid fa-arrow-left"></i> Back to Map</a>
-            <div class="history-title mp-title-wrap">
-              <h1 id="pantryTitle" class="mp-title">My Pantry</h1>
-              <p id="pantrySubtitle" class="mp-subtitle">Overview and management tools for your pantry.</p>
-            </div>
-          </header>
 
-          <nav class="tabs mp-tabs" role="tablist" aria-label="My Pantry Tabs">
-            <button class="tab active" data-tab="overview"><span class="tab-ico">📊</span> <span class="tab-label">Overview</span></button>
-            <button class="tab" data-tab="sensors"><span class="tab-ico">📡</span> <span class="tab-label">Sensors</span></button>
-            <button class="tab" data-tab="wishlist"><span class="tab-ico">📝</span> <span class="tab-label">Wishlist</span></button>
-            <button class="tab" data-tab="activity"><span class="tab-ico">📋</span> <span class="tab-label">Activity</span></button>
-            <button class="tab" data-tab="settings"><span class="tab-ico">⚙️</span> <span class="tab-label">Settings</span></button>
-          </nav>
+          <!-- View 1: Pantry List (shown when no pantry is selected) -->
+          <div id="pantry-list-view" class="mp-view">
+            <header class="mp-header">
+              <div class="mp-title-wrap">
+                <h1 id="listViewTitle" class="mp-title">My Pantries</h1>
+                <p id="listViewSubtitle" class="mp-subtitle">Manage and monitor your community pantries</p>
+              </div>
+            </header>
+
+            <!-- List Controls -->
+            <div class="mp-list-controls">
+              <div class="mp-search-wrap">
+                <i class="fa-solid fa-search"></i>
+                <input type="text" id="mp-search" class="mp-search-input" placeholder="Search pantries..." />
+              </div>
+              <div class="mp-filter-controls">
+                <select id="mp-filter-status" class="mp-filter-select">
+                  <option value="all">All Status</option>
+                  <option value="open">Open</option>
+                  <option value="closed">Closed</option>
+                </select>
+                <select id="mp-filter-stock" class="mp-filter-select">
+                  <option value="all">All Stock Levels</option>
+                  <option value="high">High Stock</option>
+                  <option value="medium">Medium Stock</option>
+                  <option value="low">Low Stock</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Pantry List Grid -->
+            <div id="mp-pantry-list" class="mp-pantry-grid">
+              <div class="mp-loading">Loading your pantries...</div>
+            </div>
+          </div>
+
+          <!-- View 2: Pantry Detail (shown when a pantry is selected) -->
+          <div id="pantry-detail-view" class="mp-view" style="display: none;">
+            <header class="mp-header history-header">
+              <button id="mp-back-to-list" class="back-link mp-back"><i class="fa-solid fa-arrow-left"></i> Back to My Pantries</button>
+              <div class="history-title mp-title-wrap">
+                <h1 id="pantryTitle" class="mp-title">My Pantry</h1>
+                <p id="pantrySubtitle" class="mp-subtitle">Overview and management tools for your pantry.</p>
+              </div>
+            </header>
+
+            <nav class="tabs mp-tabs" role="tablist" aria-label="My Pantry Tabs">
+              <button class="tab active" data-tab="overview"><span class="tab-ico">📊</span> <span class="tab-label">Overview</span></button>
+              <button class="tab" data-tab="sensors"><span class="tab-ico">📡</span> <span class="tab-label">Sensors</span></button>
+              <button class="tab" data-tab="wishlist"><span class="tab-ico">📝</span> <span class="tab-label">Wishlist</span></button>
+              <button class="tab" data-tab="activity"><span class="tab-ico">📋</span> <span class="tab-label">Activity</span></button>
+              <button class="tab" data-tab="settings"><span class="tab-ico">⚙️</span> <span class="tab-label">Settings</span></button>
+            </nav>
 
           <div class="tab-panels">
             <section id="tab-overview" class="tab-panel active">
@@ -251,6 +290,7 @@
               <div id="mp-toast" aria-live="polite" style="position:fixed;right:18px;bottom:18px;z-index:6000;pointer-events:none;"></div>
             </section>
           </div>
+          </div><!-- End of pantry-detail-view -->
         </div>
       </main>
     </div>
