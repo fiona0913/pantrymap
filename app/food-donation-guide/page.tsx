@@ -127,15 +127,8 @@ export default function FoodDonationGuideLandingPage() {
     "rounded-2xl border border-gray-200 bg-white p-6 shadow-sm";
   const guidanceCardClassName =
     "rounded-2xl border border-sky-200 bg-sky-50 p-6 shadow-sm";
-  const okDecisionCardClassName =
-    "rounded-2xl border border-emerald-200 bg-emerald-50 p-6 shadow-sm";
-  const avoidDecisionCardClassName =
-    "rounded-2xl border border-rose-200 bg-rose-50 p-6 shadow-sm";
   const cardTitleClassName = "text-lg font-semibold text-black mt-0 mb-4";
-  const cardBodyClassName = "text-sm text-black leading-6";
   const bulletListClassName = cardListClassName;
-  const numberedListClassName =
-    "mt-2 list-decimal pl-6 space-y-2 text-sm text-black leading-6";
   const resources = [
     {
       title: "Washington Department of Health — Charity Food Donations",
@@ -214,7 +207,7 @@ export default function FoodDonationGuideLandingPage() {
           <h2 className="text-2xl font-bold">How to Use This Guide</h2>
           <p className="text-sm text-black">
             This page walks you through the key sections below, from quick
-            preparation tips to donation decisions and FAQs.
+            preparation tips to quick guidance, FAQs, and resources.
           </p>
         </div>
         <button
@@ -241,14 +234,6 @@ export default function FoodDonationGuideLandingPage() {
             others can make safe choices.
           </li>
           <li>
-            <strong>Generally OK to Donate:</strong> Common lower-risk items
-            that are typically acceptable.
-          </li>
-          <li>
-            <strong>Avoid Donating:</strong> Higher-risk or uncertain items that
-            should not be left.
-          </li>
-          <li>
             <strong>FAQ:</strong> Expand questions to see clear answers to
             common donation concerns.
           </li>
@@ -257,7 +242,7 @@ export default function FoodDonationGuideLandingPage() {
             documents used in this guide.
           </li>
           <li>
-            <strong>Check &amp; Research an Item:</strong> A separate page where
+            <strong>Item Look-Up:</strong> A separate page where
             you can search or browse categories to check a specific item before
             donating.
           </li>
@@ -272,7 +257,7 @@ export default function FoodDonationGuideLandingPage() {
         <section className="mb-10 relative overflow-hidden rounded-2xl border border-emerald-100 bg-gradient-to-r from-emerald-50 via-white to-white p-4 shadow-sm md:p-5">
           <div className="space-y-3">
             <h1 className="text-3xl font-semibold text-neutral-900">
-              Pantry Donation Guide
+              Donation Guide
             </h1>
             <p className="mt-1 max-w-xl text-base text-black">
               Learn the basics of donating thoughtfully, then use the tool to
@@ -293,7 +278,7 @@ export default function FoodDonationGuideLandingPage() {
                 href="/food-donation-guide/search"
                 className={heroButtonClassName}
               >
-                Check &amp; Research an Item
+                Item Look-Up
               </Link>
               <button
                 type="button"
@@ -378,50 +363,6 @@ export default function FoodDonationGuideLandingPage() {
                 </li>
                 <li>List ingredients when possible.</li>
                 <li>Call out common allergens.</li>
-              </ul>
-            </div>
-          </div>
-        </section>
-
-        <section className="mt-10">
-          <h2 className="text-2xl font-semibold text-neutral-900">
-            Donation Decisions
-          </h2>
-          <p className="max-w-2xl text-sm text-black">
-            Use these lists to decide what is safe to donate.
-          </p>
-          <p className="mt-1 text-sm text-black">
-            If you’re unsure about a specific item, click “Check &amp; Research
-            An Item” above before donating.
-          </p>
-          <div className="mt-4 grid gap-6 md:grid-cols-2">
-            <div className={okDecisionCardClassName}>
-              <h3 className={cardTitleClassName}>Generally OK to Donate</h3>
-              <p className={cardBodyClassName}>
-                <strong>Shelf-stable and sealed items.</strong>
-              </p>
-              <ul className={bulletListClassName}>
-                <li>Canned vegetables, beans, soups, and fruit.</li>
-                <li>Dry goods: rice, pasta, oats, cereal.</li>
-                <li>Nut butters, shelf-stable milk, snacks.</li>
-                <li>Baby food, formula (sealed), and diapers.</li>
-                <li>Basic hygiene items and paper goods.</li>
-              </ul>
-            </div>
-
-            <div className={avoidDecisionCardClassName}>
-              <h3 className={cardTitleClassName}>Avoid Donating</h3>
-              <p className={cardBodyClassName}>
-                <strong>High-risk or unknown items.</strong>
-              </p>
-              <ul className={bulletListClassName}>
-                <li>Opened packages or items without labels.</li>
-                <li>Homemade meals, home-canned, unsealed baked goods.</li>
-                <li>Past best-by or use-by dates.</li>
-                <li>Damaged packaging, rust, bulging cans.</li>
-                <li>
-                  Perishables without reliable refrigeration.
-                </li>
               </ul>
             </div>
           </div>

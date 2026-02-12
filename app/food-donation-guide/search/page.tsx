@@ -22,7 +22,7 @@ export default function FoodDonationGuideSearchPage() {
         type="button"
         onClick={() => router.push("/food-donation-guide")}
         className="absolute left-6 top-6 z-10 mb-4 inline-flex h-12 w-12 cursor-pointer items-center justify-center rounded-full text-emerald-700 transition hover:bg-emerald-50 hover:text-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 focus-visible:ring-offset-2"
-        aria-label="Back to Pantry Donation Guide"
+        aria-label="Back to Donation Guide"
       >
         <ChevronLeft className="h-8 w-8" strokeWidth={2.5} />
       </button>
@@ -30,7 +30,7 @@ export default function FoodDonationGuideSearchPage() {
         <div className="container mx-auto px-4">
           <div className="flex flex-col items-center gap-8">
             <h1 className="text-[2.5rem] font-bold text-green-800 text-center">
-              Pantry Donation Guide
+              Donation Guide
             </h1>
             <div className="max-w-2xl w-full mt-6 mb-1">
               <SearchBar foodsData={foodsData} onResultClick={handleResultClick} />

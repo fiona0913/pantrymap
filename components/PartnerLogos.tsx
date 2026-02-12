@@ -1,4 +1,15 @@
-const partners = [
+import type { CSSProperties } from "react";
+
+type Partner = {
+  name: string;
+  src: string;
+  scale?: number;
+  maxWidthClass?: string;
+  softenBlendMode?: CSSProperties["mixBlendMode"];
+  softenOpacity?: number;
+};
+
+const partners: Partner[] = [
   {
     name: "Urban Freight Lab",
     src: "/partners/uw-urban-freight-lab.png",

@@ -104,16 +104,18 @@ const actions = [
     title: "Explore",
     desc: "Find micro-pantries near you on our interactive map.",
     cta: "Open Map",
-    href: "/",
-    comingSoon: true,
+    href: "/map",
+    comingSoon: false,
+    external: false,
   },
   {
     icon: Gift,
     title: "Donate",
     desc: "Check our donation guidelines and contribute to a local pantry.",
-    cta: "Pantry Donation Guide",
+    cta: "Donation Guide",
     href: "/food-donation-guide",
     comingSoon: false,
+    external: false,
   },
   {
     icon: MapPinPlus,
@@ -122,6 +124,7 @@ const actions = [
     cta: "Open Form",
     href: "/update",
     comingSoon: false,
+    external: false,
   },
   {
     icon: Share2,
@@ -130,6 +133,7 @@ const actions = [
     cta: "Share",
     href: "#",
     comingSoon: false,
+    external: false,
   },
 ];
 
@@ -142,12 +146,12 @@ const faqs = [
   {
     question: "What can I donate?",
     answer:
-      "Shelf-stable, unopened items are generally best (e.g., canned goods, pasta, rice, peanut butter). For items that require refrigeration, homemade food, or anything near expiration, please check the Pantry Donation Guide or confirm with the site.",
+      "Shelf-stable, unopened items are generally best (e.g., canned goods, pasta, rice, peanut butter). For items that require refrigeration, homemade food, or anything near expiration, please check the Donation Guide or confirm with the site.",
   },
   {
     question: "What should I avoid donating?",
     answer:
-      "Please avoid:\nOpened packages, homemade meals, or home-canned goods\nItems past the expiration date or with damaged packaging\nPerishable items unless the pantry clearly supports refrigeration\nWhen in doubt, use the Pantry Donation Guide or choose shelf-stable options.",
+      "Please avoid:\nOpened packages, homemade meals, or home-canned goods\nItems past the expiration date or with damaged packaging\nPerishable items unless the pantry clearly supports refrigeration\nWhen in doubt, use the Donation Guide or choose shelf-stable options.",
   },
   {
     question: "Can I take items if I didn’t donate?",
@@ -162,7 +166,7 @@ const faqs = [
   {
     question: "Is it okay to donate fresh produce or refrigerated items?",
     answer:
-      "Sometimes. Some sites can support produce or refrigerated items, but not all. Please check the Pantry Donation Guide and follow any posted pantry notes.",
+      "Sometimes. Some sites can support produce or refrigerated items, but not all. Please check the Donation Guide and follow any posted pantry notes.",
   },
   {
     question: "How do I know if a pantry is active or stocked?",
@@ -177,7 +181,7 @@ const faqs = [
   {
     question: "Will information change over time?",
     answer:
-      "Yes. Pantry availability and guidelines can change. We review updates regularly, and the Pantry Donation Guide may be refined based on partner feedback.",
+      "Yes. Pantry availability and guidelines can change. We review updates regularly, and the Donation Guide may be refined based on partner feedback.",
   },
   {
     question: "Is this tool the only source of guidance?",
@@ -240,7 +244,7 @@ export default function AboutUsClient({ initialTab }: AboutUsClientProps) {
                     className="rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-neutral-900 shadow-sm transition-colors hover:border-emerald-200 hover:bg-emerald-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 focus-visible:ring-offset-2"
                     href="/food-donation-guide"
                   >
-                    Pantry Donation Guide
+                    Donation Guide
                   </Link>
                 </div>
               </>
