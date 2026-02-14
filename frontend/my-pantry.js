@@ -61,13 +61,24 @@ async function loadAllPantries() {
   }
 }
 
-// Calculate stock level from inventory
+// Stock level: prefer weight-based (sens_weight / tot_reported_weight) from API; fallback to item count
 function calculateStockLevel(pantry) {
+  const weightKg = pantry.stockLevelWeightKg != null ? pantry.stockLevelWeightKg : null;
+  if (weightKg != null && window.PantryAPI && window.PantryAPI.computeStockLevelFromWeight && window.PantryAPI.isWeightInReasonableRange(weightKg)) {
+    const badge = window.PantryAPI.computeStockLevelFromWeight(weightKg);
+    if (badge) {
+      const params = window.PantryAPI.STOCK_PARAMS || { low_weight: 5, high_weight: 25 };
+      let ratio = 0;
+      if (weightKg <= params.low_weight) ratio = weightKg / params.low_weight;
+      else if (weightKg <= params.high_weight) ratio = 0.33 + 0.34 * (weightKg - params.low_weight) / (params.high_weight - params.low_weight);
+      else ratio = Math.min(1, 0.67 + (weightKg - params.high_weight) / (params.high_weight * 2));
+      return { level: badge.level, label: badge.label, total: weightKg, ratio: Math.min(ratio, 1), weightKg };
+    }
+  }
   const categories = pantry.inventory?.categories || [];
   const total = categories.reduce((sum, cat) => sum + (cat.quantity || 0), 0);
-  const capacity = 40; // default capacity
+  const capacity = 40;
   const ratio = Math.min(total / capacity, 1);
-
   if (ratio >= 0.6) return { level: 'high', label: 'High', total, ratio };
   if (ratio >= 0.3) return { level: 'medium', label: 'Medium', total, ratio };
   return { level: 'low', label: 'Low', total, ratio };
@@ -80,8 +91,8 @@ function renderPantryCard(pantry) {
   const status = pantry.status || 'open';
   const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
   const address = pantry.address || 'Address not available';
-  const lastUpdated = pantry.sensors?.updatedAt
-    ? new Date(pantry.sensors.updatedAt).toLocaleDateString()
+  const lastUpdated = (pantry.stockLevelUpdatedAt || pantry.sensors?.updatedAt)
+    ? new Date(pantry.stockLevelUpdatedAt || pantry.sensors.updatedAt).toLocaleDateString()
     : 'N/A';
 
   // Check if the photo URL is valid (not placeholder or empty)
@@ -113,8 +124,8 @@ function renderPantryCard(pantry) {
             </div>
           </div>
           <div class="mp-stat">
-            <span class="mp-stat-label">Items</span>
-            <span class="mp-stat-value">${stock.total}</span>
+            <span class="mp-stat-label">${stock.weightKg != null ? 'Weight' : 'Items'}</span>
+            <span class="mp-stat-value">${stock.weightKg != null ? `${Number(stock.total).toFixed(1)} kg` : stock.total}</span>
           </div>
           <div class="mp-stat">
             <span class="mp-stat-label">Updated</span>
@@ -198,6 +209,12 @@ function filterPantries() {
 function showListView() {
   currentView = 'list';
   selectedPantry = null;
+
+  // 停止 pantry_data.json 的定时刷新
+  if (window._pantryDataRefreshInterval) {
+    clearInterval(window._pantryDataRefreshInterval);
+    window._pantryDataRefreshInterval = null;
+  }
 
   const listView = document.getElementById('pantry-list-view');
   const detailView = document.getElementById('pantry-detail-view');
@@ -313,8 +330,48 @@ async function initDetailView(pantry) {
   }
   if (typeof window._initSettingsSection === 'function') window._initSettingsSection(pantry);
 
-  // Load sensor data
-  if (typeof window._loadBeaconCSVAndRender === 'function') {
+  // Load sensor data: prefer real-time API (getTelemetryLatest e.g. 254), then pantry_data.json, then CSV fallback
+  if (window._pantryDataRefreshInterval) {
+    clearInterval(window._pantryDataRefreshInterval);
+    window._pantryDataRefreshInterval = null;
+  }
+  // 1) 优先用实时 telemetry API（Beacon Hill 254 等）更新传感器重量
+  if (typeof window._applyTelemetryLatestToPantry === 'function') {
+    try {
+      await window._applyTelemetryLatestToPantry(pantry.id);
+    } catch (e) { console.warn('getTelemetryLatest failed', e); }
+  }
+  if (typeof window._loadPantryDataJsonAndRender === 'function') {
+    try {
+      const result = await window._loadPantryDataJsonAndRender(pantry.id);
+      if (result) {
+        // 每 30 分钟重新请求实时 telemetry + pantry_data 并刷新 Sensors
+        const THIRTY_MIN_MS = 30 * 60 * 1000;
+        window._pantryDataRefreshInterval = setInterval(async () => {
+          if (currentView !== 'detail' || !selectedPantry || selectedPantry.id !== pantry.id) return;
+          try {
+            if (typeof window._applyTelemetryLatestToPantry === 'function') {
+              await window._applyTelemetryLatestToPantry(pantry.id);
+            }
+            await window._loadPantryDataJsonAndRender(pantry.id);
+          } catch (e) {}
+        }, THIRTY_MIN_MS);
+      } else {
+        if (selectedPantry && String(selectedPantry.id) === String(pantry.id) && selectedPantry.sensorsUnavailable && typeof applyPantryDataToUI === 'function') {
+          applyPantryDataToUI({
+            modules: {
+              performance: { sensorsUnavailable: true },
+              persona: { name: selectedPantry.name || 'My Pantry', status: selectedPantry.status || 'Open' },
+              highlights: { recentActivity: [] },
+            },
+          });
+        }
+        if (typeof window._loadBeaconCSVAndRender === 'function') {
+          await window._loadBeaconCSVAndRender('BeaconHill_2026-01-22_to_2026-01-29.csv');
+        }
+      }
+    } catch(e) {}
+  } else if (typeof window._loadBeaconCSVAndRender === 'function') {
     try { await window._loadBeaconCSVAndRender('BeaconHill_2026-01-22_to_2026-01-29.csv'); } catch(e) {}
   }
 
@@ -367,7 +424,7 @@ function applyPantryDataToUI(data) {
     const perf = data.modules.performance;
     const statusRoot = document.getElementById('statusCards');
     if (perf && statusRoot) {
-      const weight = perf.stockLevel !== undefined ? perf.stockLevel + ' kg' : '\u2014';
+      const weight = perf.sensorsUnavailable && perf.stockLevel === undefined ? 'Sensor data unavailable. No reported stock in the last 24h.' : (perf.stockLevel !== undefined ? perf.stockLevel + ' kg' : '\u2014');
       const temp = perf.temperature !== undefined ? perf.temperature + ' \u00B0C' : '\u2014';
       const battery = perf.batteryStatus !== undefined ? perf.batteryStatus : '\u2014';
       const visits = perf.doorVisits !== undefined ? perf.doorVisits : '\u2014';
@@ -691,10 +748,22 @@ document.addEventListener('DOMContentLoaded', function() {
     if(delBtn) delBtn.addEventListener('click', ()=>{ if(!delInput || delInput.value.trim() !== 'DELETE') return; try{ localStorage.removeItem(getSettingsKey(pantry.id)); localStorage.removeItem(`wishlist_${pantry.id}`); localStorage.setItem(`pantry_deleted_${pantry.id}`, '1'); showToast('Pantry deleted (local). Redirecting...'); setTimeout(()=>{ window.location.href = './index.html'; },900); }catch(e){ console.warn('delete',e); showToast('Delete failed'); } });
   }
 
-  function renderStatusCards(pantry){ const root=document.getElementById('statusCards'); if(!root) return; const total = (pantry.inventory?.categories||[]).reduce((s,c)=>s+(c.quantity||0),0); const stockLevel = total<=10? 'Low': (total<=30? 'Medium':'High'); const status = pantry.status||'open'; root.innerHTML=`
+  function renderStatusCards(pantry){ const root=document.getElementById('statusCards'); if(!root) return;
+    const status = pantry.status||'open';
+    const stockLabel = pantry.stockLevel != null ? pantry.stockLevel : null;
+    const stockWeightKg = pantry.stockLevelWeightKg != null ? pantry.stockLevelWeightKg : null;
+    const totalItems = (pantry.inventory?.categories||[]).reduce((s,c)=>s+(c.quantity||0),0);
+    const stockLevel = stockLabel != null ? stockLabel : (totalItems<=10? 'Low': (totalItems<=30? 'Medium':'High'));
+    const sensorsUnavailable = pantry.sensorsUnavailable && (stockWeightKg == null || !Number.isFinite(stockWeightKg));
+    const fromDonations = pantry.stockSource === 'donations';
+    let stockDetail = sensorsUnavailable ? 'Sensor data unavailable. No reported stock in the last 24h.' : (stockWeightKg != null && Number.isFinite(stockWeightKg) ? `${stockLevel} (${Number(stockWeightKg).toFixed(1)} kg)` : `${stockLevel} (${totalItems} items)`);
+    if (!sensorsUnavailable && fromDonations && stockWeightKg != null) stockDetail += ' · Estimated from donations';
+    const lastUpdated = pantry.stockLevelUpdatedAt || pantry.sensors?.updatedAt;
+    const lastUpdatedText = lastUpdated ? formatDateTimeMinutes(lastUpdated) : (sensorsUnavailable ? 'Sensor data unavailable. No reported stock in the last 24h.' : '—');
+    root.innerHTML=`
     <div><strong>Status:</strong> <span class="badge ${status}">${status.charAt(0).toUpperCase()+status.slice(1)}</span></div>
-    <div><strong>Stock Level:</strong> ${stockLevel} (${total} items)</div>
-    <div><strong>Last Updated:</strong> ${pantry.sensors?.updatedAt?formatDateTimeMinutes(pantry.sensors.updatedAt):'—'}</div>
+    <div><strong>Stock Level:</strong> ${stockDetail}</div>
+    <div><strong>Last updated:</strong> ${lastUpdatedText}</div>
     <div><strong>Condition:</strong> ${pantry.sensors?.foodCondition?escapeHtml(pantry.sensors.foodCondition):'—'}</div>
   `; }
 
@@ -940,18 +1009,36 @@ document.addEventListener('DOMContentLoaded', function() {
   // Load data sources and render
   async function loadPantry(pantryId){ try{ const resp = await fetch('./pantries.json'); const pantries = await resp.json(); const pantry = pantries.find(p=>String(p.id)===String(pantryId)) || pantries[0]; return pantry; }catch(e){ console.warn('Failed to load pantries.json',e); return null; } }
 
-  async function loadTelemetry(pantryId){ if (window.PantryAPI && window.PantryAPI.getTelemetryHistory) { try{ const items = await window.PantryAPI.getTelemetryHistory(pantryId); return items || []; }catch(e){ console.warn('PantryAPI telemetry error', e); } } // fallback to mockData.json
-    // Try to load real CSV data first (data/20251111.csv), then fall back to mockData.json
+  async function loadTelemetry(pantryId){
+    // 1) 优先使用 Azure SQL 导出的按 pantry 分组数据（fetch_data.py 生成的 telemetry_by_pantry.json）
     try{
-      // attempt CSV in data folder
+      const r = await fetch('./data/telemetry_by_pantry.json?' + (Date.now()));
+      if (r && r.ok){
+        const byPantry = await r.json();
+        const raw = byPantry[String(pantryId)] || byPantry[pantryId];
+        if (Array.isArray(raw) && raw.length > 0){
+          const items = raw.map(row=>{
+            const mass = row.mass != null ? Number(row.mass) : NaN;
+            const units = (row.units || '').toString().toLowerCase();
+            const kg = !Number.isNaN(mass) ? (units === 'lb' ? mass * 0.453592 : mass) : undefined;
+            return { ts: row.ts || row.timestamp || row.time, mass: row.mass, metrics: kg != null ? { weightKg: kg } : {}, door: row.door };
+          });
+          return items;
+        }
+      }
+    }catch(e){ console.warn('telemetry_by_pantry.json load failed', e); }
+    // 2) 后端 API
+    if (window.PantryAPI && window.PantryAPI.getTelemetryHistory) { try{ const items = await window.PantryAPI.getTelemetryHistory(pantryId); return items || []; }catch(e){ console.warn('PantryAPI telemetry error', e); } }
+    // 3) CSV 回退
+    try{
       const csvResp = await fetch('./data/20251111.csv');
       if (csvResp && csvResp.ok){ const csvText = await csvResp.text(); const parsed = Papa.parse(csvText, { header: true, dynamicTyping: true, skipEmptyLines: true }); const rows = Array.isArray(parsed.data) ? parsed.data : [];
-          // convert rows to telemetry item format used elsewhere
           const items = rows.map(r=>({ ts: r.ts || r.time || r.timestamp, mass: r.mass, metrics: { weightKg: (r.mass && !Number.isNaN(Number(r.mass))) ? Number(r.mass) * 0.453592 : undefined }, door: r.door }));
           return items;
       }
     }catch(e){ console.warn('CSV load failed', e); }
-    try{ const r = await fetch('./mockData.json'); const j = await r.json(); return Array.isArray(j)? j : (j.items||[]); }catch(e){ console.warn('Failed to load mockData.json', e); return []; } }
+    try{ const r = await fetch('./mockData.json'); const j = await r.json(); return Array.isArray(j)? j : (j.items||[]); }catch(e){ console.warn('Failed to load mockData.json', e); return []; }
+  }
 
   // Attempt to load a real CSV from several likely paths and return telemetry-like items
   async function loadRealSensorData(){
@@ -1026,20 +1113,8 @@ document.addEventListener('DOMContentLoaded', function() {
     return processEvents(rawData);
   }
 
-  // Load BeaconHill CSV, compute total weight, update UI and render activity cards
-  async function loadBeaconCSVAndRender(fileName){
-    if (!fileName) return null;
-    const possible = [ `./data/${fileName}`, `/data/${fileName}`, `./${fileName}`, `/${fileName}` ];
-    let text = null; let usedPath = null;
-    for (const p of possible){
-      try{ const resp = await fetch(p); if (resp && resp.ok){ text = await resp.text(); usedPath = p; break; } }catch(e){}
-    }
-    if (!text) return null;
-    const parsed = Papa.parse(text, { header: true, dynamicTyping: true, skipEmptyLines: true });
-    const rows = Array.isArray(parsed.data) ? parsed.data : [];
-    if (rows.length===0) return null;
-
-    // Map rows -> entries with timestamp and total_weight (sum of scale1..scale4)
+  // Build entries from rows (CSV or JSON) with timestamp, scale1-4, is_event, door1_open, door2_open
+  function buildEntriesFromRows(rows) {
     const entries = rows.map(r=>{
       const tsRaw = r.ts || r.timestamp || r.time || r.date || r.datetime;
       const ts = (tsRaw ? new Date(tsRaw) : null);
@@ -1047,17 +1122,17 @@ document.addEventListener('DOMContentLoaded', function() {
       const s2 = Number.isFinite(Number(r.scale2)) ? Number(r.scale2) : 0;
       const s3 = Number.isFinite(Number(r.scale3)) ? Number(r.scale3) : 0;
       const s4 = Number.isFinite(Number(r.scale4)) ? Number(r.scale4) : 0;
-      const total = s1 + s2 + s3 + s4; // assume CSV scales already in kg or consistent unit
+      const total = s1 + s2 + s3 + s4;
       return { raw: r, ts: ts, tsIso: ts?ts.toISOString():null, totalWeight: total, isEvent: (r.is_event===true || r.is_event===1 || String(r.is_event).toLowerCase()==='true' || String(r.is_event)==='1') };
     }).filter(e=>e.ts);
-    // sort by timestamp asc
     entries.sort((a,b)=>a.ts - b.ts);
+    return entries;
+  }
 
-    // Title and status cards are handled by applyPantryDataToUI (dashboard_data.json)
-    // This function only renders door cycles and weight changes into the Sensors tab.
-
-    // Detect contiguous event blocks (isEvent true)
-    const WINDOW = 5; // samples before/after to average
+  // Shared: from entries build cycles and render Sensors tab (cycle cards, weight chart, door timeline)
+  function processEntriesAndRender(entries) {
+    if (!entries || entries.length === 0) return null;
+    const WINDOW = 5;
     const cycles = [];
     let i = 0;
     while (i < entries.length){
@@ -1065,7 +1140,6 @@ document.addEventListener('DOMContentLoaded', function() {
       const startIdx = i;
       while (i < entries.length && entries[i].isEvent) i++;
       const endIdx = i - 1;
-      // before avg
       const beforeStart = Math.max(0, startIdx - WINDOW);
       const beforeSlice = entries.slice(beforeStart, startIdx).map(e=>e.totalWeight).filter(v=>Number.isFinite(v));
       const afterEnd = Math.min(entries.length, endIdx + 1 + WINDOW);
@@ -1078,32 +1152,18 @@ document.addEventListener('DOMContentLoaded', function() {
       const durationSec = (startTs && endTs) ? Math.round((endTs - startTs)/1000) : null;
       cycles.push({ startIdx, endIdx, startTs, endTs, durationSec, beforeAvg, afterAvg, change });
     }
-
-    // sort newest->oldest
     cycles.sort((a,b)=> (b.endTs?b.endTs.getTime():0) - (a.endTs?a.endTs.getTime():0));
-
-    // Store cycles globally so the time filter can access them
     window._csvCycles = cycles;
-
-    // Initial render
     renderCycleCards(cycles);
-
-    // --- Build weight trend data from entries and render the Weight Trend chart ---
-    const weightTrendData = entries
-      .filter(e => Number.isFinite(e.totalWeight))
-      .map(e => ({ ts: e.tsIso, weightKg: e.totalWeight }));
+    const weightTrendData = entries.filter(e => Number.isFinite(e.totalWeight)).map(e => ({ ts: e.tsIso, weightKg: e.totalWeight }));
     renderWeightChartInto(null, weightTrendData, cycles);
-
-    // --- Build door events from door1_open / door2_open columns and render Door Events ---
     const doorEvents = [];
     for (let di = 0; di < entries.length; di++) {
       const e = entries[di];
       const raw = e.raw;
-      // Determine door open state from door1_open or door2_open columns
       const d1 = (raw.door1_open === true || raw.door1_open === 1 || String(raw.door1_open).toLowerCase() === 'true');
       const d2 = (raw.door2_open === true || raw.door2_open === 1 || String(raw.door2_open).toLowerCase() === 'true');
       const isOpen = d1 || d2;
-
       if (di === 0) {
         doorEvents.push({ ts: e.tsIso, status: isOpen ? 'open' : 'closed' });
         continue;
@@ -1112,14 +1172,154 @@ document.addEventListener('DOMContentLoaded', function() {
       const prevD1 = (prevRaw.door1_open === true || prevRaw.door1_open === 1 || String(prevRaw.door1_open).toLowerCase() === 'true');
       const prevD2 = (prevRaw.door2_open === true || prevRaw.door2_open === 1 || String(prevRaw.door2_open).toLowerCase() === 'true');
       const prevOpen = prevD1 || prevD2;
-
-      if (isOpen !== prevOpen) {
-        doorEvents.push({ ts: e.tsIso, status: isOpen ? 'open' : 'closed' });
-      }
+      if (isOpen !== prevOpen) doorEvents.push({ ts: e.tsIso, status: isOpen ? 'open' : 'closed' });
     }
     renderDoorTimelineInto(null, doorEvents, cycles);
-
     return { entries, cycles };
+  }
+
+  // Uses API.getTelemetryLatest(pantryId): real-time API → pantry_data.json → donations (last 24h).
+  // Updates selectedPantry with weight and source; source 'donations' shows "Estimated from donations" in UI.
+  async function applyTelemetryLatestToPantry(pantryId) {
+    if (!pantryId || !window.PantryAPI || typeof window.PantryAPI.getTelemetryLatest !== 'function') return false;
+    if (!selectedPantry || String(selectedPantry.id) !== String(pantryId)) return false;
+    try {
+      const telemetry = await window.PantryAPI.getTelemetryLatest(pantryId);
+      if (!telemetry || (telemetry.weight == null && telemetry.weightKg == null)) {
+        selectedPantry.sensorsUnavailable = true;
+        selectedPantry.stockSource = null;
+        return false;
+      }
+      const weightKg = Number(telemetry.weight ?? telemetry.weightKg);
+      if (!Number.isFinite(weightKg)) {
+        selectedPantry.sensorsUnavailable = true;
+        selectedPantry.stockSource = null;
+        return false;
+      }
+      const updatedAt = telemetry.timestamp ?? telemetry.updatedAt ?? telemetry.ts ?? new Date().toISOString();
+      selectedPantry.sensorsUnavailable = false;
+      selectedPantry.stockSource = telemetry.source || 'sensor';
+      selectedPantry.sensors = Object.assign({}, selectedPantry.sensors, { weightKg, updatedAt });
+      selectedPantry.stockLevelWeightKg = weightKg;
+      selectedPantry.stockLevelUpdatedAt = updatedAt;
+      return true;
+    } catch (e) {
+      console.warn('applyTelemetryLatestToPantry failed', e);
+      if (selectedPantry && String(selectedPantry.id) === String(pantryId)) {
+        selectedPantry.sensorsUnavailable = true;
+        selectedPantry.stockSource = null;
+      }
+      return false;
+    }
+  }
+
+  // Load pantry_data.json for a pantry: use device_to_pantry to get device_id (e.g. BeaconHill -> p-2), filter JSON by device_id, render Sensors
+  async function loadPantryDataJsonAndRender(pantryId) {
+    try {
+      const dtpResp = await fetch('./data/device_to_pantry.json?' + Date.now());
+      if (!dtpResp || !dtpResp.ok) return null;
+      const deviceToPantry = await dtpResp.json();
+      const deviceId = Object.keys(deviceToPantry).find(k => String(deviceToPantry[k]) === String(pantryId));
+      if (!deviceId) return null;
+
+      const dataResp = await fetch('./pantry_data.json?' + Date.now());
+      if (!dataResp || !dataResp.ok) return null;
+      const list = await dataResp.json();
+      const rows = Array.isArray(list) ? list.filter(r => (r.device_id || r.deviceId || '') === deviceId) : [];
+      if (rows.length === 0) return null;
+
+      const entries = buildEntriesFromRows(rows);
+      const processed = processEntriesAndRender(entries);
+
+      // 同步 Overview 区域的 Current Weight / Temperature / Battery / Door Visits 到最新 SQL 记录
+      try {
+        if (typeof applyPantryDataToUI === 'function' && rows.length > 0 && selectedPantry && String(selectedPantry.id) === String(pantryId)) {
+          // 找到时间最新的一条记录
+          const latestWrapped = rows.reduce((best, row) => {
+            const ts = new Date(row.timestamp || row.ts || row.time || 0).getTime();
+            if (!best) return { row, ts };
+            return ts > best.ts ? { row, ts } : best;
+          }, null);
+
+          if (latestWrapped && latestWrapped.row) {
+            const r = latestWrapped.row;
+
+            // 1) 当前总重量（kg）：优先用 scale1..4 之和，其次尝试 mass 字段
+            let totalKg = NaN;
+            const s1 = Number(r.scale1 ?? 0);
+            const s2 = Number(r.scale2 ?? 0);
+            const s3 = Number(r.scale3 ?? 0);
+            const s4 = Number(r.scale4 ?? 0);
+            if ([s1, s2, s3, s4].some(v => Number.isFinite(v) && v !== 0)) {
+              totalKg = s1 + s2 + s3 + s4;
+            } else if (r.mass != null) {
+              const mass = Number(r.mass);
+              if (Number.isFinite(mass)) {
+                const units = (r.units || '').toString().toLowerCase();
+                totalKg = units === 'lb' ? mass * 0.453592 : mass;
+              }
+            }
+
+            // 2) 温度 / 电量 / 门访问次数
+            const tempC = typeof r.air_temp === 'number' ? Number(r.air_temp.toFixed(1)) : undefined;
+            const batteryPct = typeof r.batt_percent === 'number' ? Math.round(r.batt_percent) : undefined;
+            const doorVisits = typeof processed?.opens === 'number' ? processed.opens : undefined;
+
+            // Prefer real-time API weight; else use pantry_data totalKg (fallback). Clear sensorsUnavailable when we have fallback data.
+            const weightForStock = selectedPantry?.sensors?.weightKg ?? selectedPantry?.stockLevelWeightKg ?? totalKg;
+            if (Number.isFinite(totalKg) && (selectedPantry?.sensors?.weightKg == null) && (selectedPantry?.stockLevelWeightKg == null)) {
+              selectedPantry.sensorsUnavailable = false;
+              selectedPantry.stockSource = 'fallback_local';
+              selectedPantry.stockLevelWeightKg = totalKg;
+              selectedPantry.stockLevelUpdatedAt = r.timestamp ?? r.ts ?? r.time;
+            }
+            const inRange = window.PantryAPI && window.PantryAPI.isWeightInReasonableRange && window.PantryAPI.isWeightInReasonableRange(weightForStock);
+            const perf = {
+              stockLevel: (Number.isFinite(weightForStock) && inRange) ? Number(Number(weightForStock).toFixed(2)) : undefined,
+              temperature: tempC,
+              doorVisits,
+              batteryStatus: typeof batteryPct === 'number' ? `${batteryPct}%` : undefined,
+            };
+
+            const persona = {
+              name: selectedPantry.name || 'My Pantry',
+              status: selectedPantry.status || 'Open',
+            };
+
+            applyPantryDataToUI({
+              modules: {
+                performance: perf,
+                persona,
+                highlights: { recentActivity: [] },
+              },
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to update Overview status cards from pantry_data.json', e);
+      }
+
+      return processed;
+    } catch (e) {
+      console.warn('loadPantryDataJsonAndRender failed', e);
+      return null;
+    }
+  }
+
+  // Load BeaconHill CSV, compute total weight, update UI and render activity cards
+  async function loadBeaconCSVAndRender(fileName){
+    if (!fileName) return null;
+    const possible = [ `./data/${fileName}`, `/data/${fileName}`, `./${fileName}`, `/${fileName}` ];
+    let text = null;
+    for (const p of possible){
+      try{ const resp = await fetch(p); if (resp && resp.ok){ text = await resp.text(); break; } }catch(e){}
+    }
+    if (!text) return null;
+    const parsed = Papa.parse(text, { header: true, dynamicTyping: true, skipEmptyLines: true });
+    const rows = Array.isArray(parsed.data) ? parsed.data : [];
+    if (rows.length===0) return null;
+    const entries = buildEntriesFromRows(rows);
+    return processEntriesAndRender(entries);
   }
 
   // Render filtered cycle cards into #activitySummaryList
@@ -1242,6 +1442,8 @@ document.addEventListener('DOMContentLoaded', function() {
   window._getActivitiesByPantryId = getActivitiesByPantryId;
   window._initSettingsSection = initSettingsSection;
   window._loadBeaconCSVAndRender = loadBeaconCSVAndRender;
+  window._loadPantryDataJsonAndRender = loadPantryDataJsonAndRender;
+  window._applyTelemetryLatestToPantry = applyTelemetryLatestToPantry;
   window._addWishlistItemToAPI = addWishlistItemToAPI;
   window._showToast = showToast;
   window._loadPantry = loadPantry;

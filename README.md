@@ -28,6 +28,9 @@ Files
 Legacy
 - `legacy/app.js`, `legacy/api.js`: Deprecated copies that used to live in the repo root. Use the `frontend/` versions instead.
 - `legacy/frontend-data/mockData.json`: Deprecated demo dataset (not used by the app).
+- `legacy/fetch_data.py`: Optional Python script to pull telemetry from Azure SQL and write `pantry_data.json`; run from project root as `python legacy/fetch_data.py`. The app prefers the Azure Functions API and uses `frontend/pantry_data.json` as fallback.
+- `legacy/served_page_3000.html`: Snapshot of My Pantry page (dev/test, not used by the app).
+- `legacy/pantry_data.json`: Backup copy of telemetry data; the live copy used by the frontend is `frontend/pantry_data.json`.
 
 Data Contract (initial)
 - Pantry object (example):

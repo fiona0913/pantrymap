@@ -11,7 +11,7 @@
 
 ### 必须
 - **Node.js**：18 或 20  
-- **Azure Functions Core Tools**：v4
+- **Azure Functions Core Tools**：v4（提供 `func` 命令）
 
 检查：
 ```bash
@@ -19,6 +19,18 @@ node -v
 npm -v
 func --version
 ```
+
+若 `func` 未找到，请先安装 Azure Functions Core Tools v4：
+
+- **Windows（PowerShell，管理员）**：
+  ```powershell
+  npm install -g azure-functions-core-tools@4 --unsafe-perm true
+  ```
+  或从 [Releases](https://github.com/Azure/azure-functions-core-tools/releases) 下载 v4 的 Windows 安装包。
+
+- **macOS**：`brew install azure-functions-core-tools@4`
+
+安装后重新打开终端，再执行 `func --version` 确认。
 
 ### 可选（跑完整功能才需要）
 - **Azure Cosmos DB**
@@ -89,6 +101,13 @@ functions-backend/local.settings.json
 - Storage：
   - `STORAGE_CONTAINER_DONATIONS` 需提前创建（如 `donation-photos`）
   - **未配置 Storage 时**：donation 上传相关接口会 500（属正常）
+- **Telemetry（Beacon Hill 等实时传感器）**：`GET /api/telemetry?pantryId=254&latest=true` 从 Azure SQL 读最新一条记录。需在 `Values` 中配置：
+  - `AZURE_SQL_SERVER`：如 `micropantry-sql-server.database.windows.net`
+  - `AZURE_SQL_DATABASE`：如 `pantry-sql`
+  - `AZURE_SQL_USER`：SQL 登录名
+  - `AZURE_SQL_PASSWORD`：密码
+  - （可选）`AZURE_SQL_TELEMETRY_TABLE`：表名，不填则自动取库中第一个表
+  - **未配置上述任一变量时**：接口返回 `{ latest: null }`，前端会退回到 `pantry_data.json`。
 
 > 💡 **端口提示**  
 > 如果你前端不是跑在 5500（例如 Live Server 用了 5501），请把对应 origin 加进 `Host.CORS`。

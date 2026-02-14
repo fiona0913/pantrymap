@@ -1259,6 +1259,40 @@ nav a { text-decoration: none; }
   border-radius: 6px;
   box-shadow: none;
 }
+
+/* Map legend (pin colors = pantry type) */
+.map-legend {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  padding: 10px 14px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  font-size: 13px;
+  color: var(--text, #1e293b);
+}
+.map-legend-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+}
+.map-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.map-legend-item:last-child { margin-bottom: 0; }
+.map-legend-pin {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  flex-shrink: 0;
+}
+
 .leaflet-popup-content-wrapper, .leaflet-popup-tip {
   background: var(--panel); 
   color: var(--text); 

@@ -31,6 +31,9 @@
     stock: 'any', // any | high-low | low-high
     restock: 'newest', // newest | oldest
   };
+  /** Default map view (Seattle area, ~5km) when returning from pantry detail */
+  const DEFAULT_MAP_CENTER = [47.6062, -122.3321];
+  const DEFAULT_MAP_ZOOM = 11;
 
   // Inline SVG placeholders (data URIs) for missing images
   const PLACEHOLDERS = {
@@ -70,41 +73,67 @@
     return `<img data-role='content-photo' ${rawAttr} src='${escapeAttr(src)}' alt='${safeAlt}' style='${escapeAttr(style)}'>`;
   }
 
-  function renderStockGauge(currentItems = 0, capacity = 40) {
+  function renderStockGauge(currentItems = 0, capacity = 40, forceLevel = null) {
     const safeCurrent = Number.isFinite(currentItems) ? currentItems : 0;
-    const ratio = Math.max(0, Math.min(safeCurrent / capacity, 1));
-    // 0 = Low, 1 = Medium, 2 = Full
-    const level = ratio >= 0.75 ? 2 : (ratio >= 0.4 ? 1 : 0);
-    const statusLabel = ['Low', 'Medium', 'Full'][level];
-    const segColors = ['#e2e8f0', '#e2e8f0', '#e2e8f0'];
-    if (level === 0) segColors[0] = '#ef4444';
-    else if (level === 1) segColors[1] = '#eab308';
-    else { segColors[0] = '#52b788'; segColors[1] = '#52b788'; segColors[2] = '#52b788'; }
-    const statusColor = level === 0 ? '#ef4444' : (level === 1 ? '#eab308' : '#2d6a4f');
-    // Three equal arcs spanning 180° (60° each), with 4° gaps
-    const cx = 100, cy = 100, r = 80;
-    const gapDeg = 4;
-    const segDeg = (180 - 2 * gapDeg) / 3; // ~57.33°
-    function arcPath(startDeg, endDeg) {
-      const s = (Math.PI / 180) * (180 + startDeg);
-      const e = (Math.PI / 180) * (180 + endDeg);
-      const x1 = cx + r * Math.cos(s), y1 = cy + r * Math.sin(s);
-      const x2 = cx + r * Math.cos(e), y2 = cy + r * Math.sin(e);
-      return `M${x1.toFixed(2)} ${y1.toFixed(2)} A${r} ${r} 0 0 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
+    let ratio = Math.max(0, Math.min(safeCurrent / capacity, 1));
+    
+    // Determine status level - can be forced by donation data
+    let statusLevel = 'low';
+    let statusLabel = 'Low';
+    
+    if (forceLevel) {
+      // Use forced level from donation data
+      statusLevel = forceLevel;
+      if (forceLevel === 'high') {
+        statusLabel = 'Full';
+        ratio = 1.0; // 100% filled for high
+      } else if (forceLevel === 'medium') {
+        statusLabel = 'Medium';
+        ratio = 0.66; // 66% filled for medium
+      } else if (forceLevel === 'inactive') {
+        statusLabel = 'Unknown';
+        ratio = 0.0; // No fill for inactive
+      } else {
+        statusLabel = 'Low';
+        ratio = 0.33; // 33% filled for low
+      }
+    } else {
+      // Calculate from ratio
+      if (ratio >= 0.75) {
+        statusLevel = 'high';
+        statusLabel = 'Full';
+      } else if (ratio >= 0.4) {
+        statusLevel = 'medium';
+        statusLabel = 'Medium';
+      } else {
+        statusLevel = 'low';
+        statusLabel = 'Low';
+      }
     }
-    const seg1 = arcPath(0, segDeg);
-    const seg2 = arcPath(segDeg + gapDeg, 2 * segDeg + gapDeg);
-    const seg3 = arcPath(2 * segDeg + 2 * gapDeg, 180);
+    
+    const radius = 80;
+    const circumference = Math.PI * radius;
+    const dashOffset = circumference * (1 - ratio);
+    
+    // Map level to color
+    const colorMap = {
+      'low': '#ef4444',      // Red
+      'medium': '#f59e0b',   // Yellow/Orange
+      'high': '#52b788',     // Green
+      'inactive': '#94a3b8' // Gray for lack of data
+    };
+    const strokeColor = colorMap[statusLevel] || '#52b788';
+    const textColor = strokeColor;
+    
     return `
-      <div class="detail-gauge">
+      <div class="detail-gauge" data-level="${statusLevel}">
         <svg viewBox="0 0 200 120" class="detail-gauge-svg" role="img" aria-label="Stock level">
-          <path d="${seg1}" fill="none" stroke="${segColors[0]}" stroke-width="14" stroke-linecap="round"/>
-          <path d="${seg2}" fill="none" stroke="${segColors[1]}" stroke-width="14" stroke-linecap="round"/>
-          <path d="${seg3}" fill="none" stroke="${segColors[2]}" stroke-width="14" stroke-linecap="round"/>
+          <path class="detail-gauge-track" d="M20 100 A80 80 0 0 1 180 100" style="fill: none; stroke: #e5e7eb; stroke-width: 20; stroke-linecap: round;" />
+          <path class="detail-gauge-fill" d="M20 100 A80 80 0 0 1 180 100"
+            style="fill: none; stroke: ${strokeColor}; stroke-width: 20; stroke-linecap: round; stroke-dasharray: ${circumference}; stroke-dashoffset: ${dashOffset};" />
         </svg>
         <div class="detail-gauge-center">
-          <div class="detail-gauge-status" style="color:${statusColor}">${statusLabel}</div>
-          <div class="detail-gauge-count">${safeCurrent} Items</div>
+          <div class="detail-gauge-status" style="color: ${textColor}">${statusLabel}</div>
         </div>
       </div>
     `;
@@ -180,6 +209,17 @@
   }
 
   // Initialize the application
+  // Get pantry id from URL: ?pantryId=254 or #pantry/254
+  function getPantryIdFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get('pantryId') || params.get('pantry_id') || params.get('id');
+    if (q) return String(q).trim();
+    const hash = (window.location.hash || '').replace(/^#/, '');
+    const m = hash.match(/^pantry\/(.+)$/i);
+    if (m) return String(m[1]).trim();
+    return null;
+  }
+
   async function init() {
     console.log('Initializing Pantry Map Dashboard...');
     
@@ -188,8 +228,22 @@
     
     // Load pantry data and create markers
     await loadPantries();
+    
+    // Open pantry detail from URL (e.g. ?pantryId=254 or #pantry/254) so pantry 254 detail page is reachable directly
+    const urlPantryId = getPantryIdFromUrl();
+    if (urlPantryId && allPantries.length > 0) {
+      const normalized = String(urlPantryId).replace(/^p-?/i, '') || urlPantryId;
+      const pantry = allPantries.find(p => {
+        const id = String(p.id || '');
+        return id === urlPantryId || id === 'p-' + normalized || id === normalized;
+      });
+      if (pantry) {
+        showPantryDetails(pantry);
+      }
+    }
+    
     // Render list for current view when no selection
-    showListForCurrentView();
+    if (!currentPantry) showListForCurrentView();
     
     // Set up event listeners
     setupEventListeners();
@@ -199,8 +253,8 @@
 
   // Initialize Leaflet map
   function initMap() {
-    // Create map centered on Seattle area (where most pantries are)
-    map = L.map('map').setView([47.6062, -122.3321], 11);
+    // Create map centered on Seattle area (where most pantries are), ~5km view
+    map = L.map('map').setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM);
     
     // Add Google-like basemap tiles (CARTO Voyager)
     L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
@@ -215,11 +269,36 @@
     // Optional scale control
     L.control.scale({ position: 'bottomleft', metric: true, imperial: false }).addTo(map);
     
+    // Map legend: pin colors = pantry type
+    const legend = L.control({ position: 'bottomright' });
+    legend.onAdd = function () {
+      const div = document.createElement('div');
+      div.className = 'map-legend';
+      div.innerHTML = `
+        <div class="map-legend-title">Legend</div>
+        <div class="map-legend-item"><span class="map-legend-pin" style="background:#3b82f6"></span> Fridge</div>
+        <div class="map-legend-item"><span class="map-legend-pin" style="background:#f59e0b"></span> Shelf</div>
+        <div class="map-legend-item"><span class="map-legend-pin" style="background:#52b788"></span> Uncategorized</div>
+      `;
+      return div;
+    };
+    legend.addTo(map);
+    
     console.log('Map initialized');
     // Update list as user moves/zooms the map, only if no pantry selected
     map.on('moveend', () => {
       if (!currentPantry) showListForCurrentView();
     });
+  }
+
+  /** Reset map to default 5km view (e.g. when returning from pantry detail). */
+  function resetMapToDefaultView() {
+    if (!map) return;
+    if (map.flyTo) {
+      map.flyTo(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM, { animate: true, duration: 0.5 });
+    } else {
+      map.setView(DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM);
+    }
   }
 
   // Load pantries from API and create markers
@@ -249,7 +328,12 @@
     }).slice(0, 50);
     // Apply type filter
     if (listControlsState.type !== 'all') {
-      inView = inView.filter(p => (p.pantryType || '').toLowerCase() === listControlsState.type);
+      inView = inView.filter(p => {
+        const pantryType = (p.pantryType || '').toLowerCase();
+        // Include uncategorized pantries (green) in all filters
+        const isUncategorized = !pantryType || (pantryType !== 'shelf' && pantryType !== 'fridge');
+        return isUncategorized || pantryType === listControlsState.type;
+      });
     }
     // Compute stock level for sorting
     const withStock = inView.map(p => ({
@@ -271,6 +355,9 @@
     detailsContent.innerHTML = renderPantryList(inView);
     attachImageFallbacks(detailsContent);
     updateCollapseButton(false);
+    
+    // Update map markers based on type filter
+    updateMapMarkerVisibility();
   }
 
   function renderPantryList(items) {
@@ -371,16 +458,16 @@
     
     console.log(`Creating marker for ${pantry.name} at [${pantry.location.lat}, ${pantry.location.lng}]`);
 
-    // Determine marker color based on status
-    const statusColors = {
-      'open': '#52b788',
-      'closed': '#ef4444',
-      'low-inventory': '#f59e0b'
+    // Determine marker color based on pantryType (shelf vs fridge)
+    const pantryType = (pantry.pantryType || '').toLowerCase();
+    const typeColors = {
+      'shelf': '#f59e0b',   // Orange for shelf
+      'fridge': '#3b82f6'   // Blue for fridge
     };
     
-    const color = statusColors[pantry.status] || statusColors['open'];
+    const color = typeColors[pantryType] || '#52b788'; // Default green if type unknown
     
-    // Create custom icon with green marker style
+    // Create custom icon with color based on pantry type
     const icon = L.divIcon({
       className: 'pantry-marker',
       html: `<div style="
@@ -420,6 +507,63 @@
     markers.set(pantry.id, marker);
   }
 
+  /** Refresh stock section from telemetry (sensor or donations). Call after posting a donation so the badge updates. */
+  function refreshStockSectionForPantry(pantry) {
+    if (!pantry || !pantry.id || !window.PantryAPI) return;
+    const stockSection = document.querySelector('.stock-section .stock-card');
+    if (!stockSection) return;
+    function showUnavailable() {
+      stockSection.innerHTML = `
+        <div class="stock-card-head">
+          <h2>Stock level</h2>
+          <span class="stock-source-badge stock-source-badge-inactive">Sensor data unavailable. No reported stock in the last 24h.</span>
+        </div>
+        ${renderStockGauge(0, 40, 'inactive')}
+      `;
+    }
+    function applyStock(weightKg, source) {
+      if (weightKg == null || !window.PantryAPI.isWeightInReasonableRange(weightKg)) return false;
+      const badge = window.PantryAPI.computeStockLevelFromWeight(weightKg);
+      if (!badge) return false;
+      const sourceLabel = source === 'donations' ? 'Estimated from donations' : 'From sensor';
+      stockSection.innerHTML = `
+        <div class="stock-card-head">
+          <h2>Stock level</h2>
+          <span class="stock-source-badge">${sourceLabel} · ${Number(weightKg).toFixed(1)} kg</span>
+        </div>
+        ${renderStockGauge(0, 40, badge.level)}
+      `;
+      return true;
+    }
+    function tryTelemetryThenDonations() {
+      if (typeof window.PantryAPI.getTelemetryLatest !== 'function') {
+        tryDonationStock();
+        return;
+      }
+      window.PantryAPI.getTelemetryLatest(pantry.id).then(function (telemetry) {
+        if (telemetry) {
+          const weightKg = telemetry.weight != null ? Number(telemetry.weight) : (telemetry.weightKg != null ? Number(telemetry.weightKg) : null);
+          const source = telemetry.source || 'sensor';
+          if (applyStock(weightKg, source)) return;
+        }
+        tryDonationStock();
+      }).catch(function () {
+        tryDonationStock();
+      });
+    }
+    function tryDonationStock() {
+      if (typeof window.PantryAPI.getDonationBasedStock !== 'function') {
+        showUnavailable();
+        return;
+      }
+      window.PantryAPI.getDonationBasedStock(pantry.id).then(function (donationStock) {
+        if (donationStock && donationStock.weightKg != null && applyStock(donationStock.weightKg, donationStock.source || 'donations')) return;
+        showUnavailable();
+      }).catch(showUnavailable);
+    }
+    tryTelemetryThenDonations();
+  }
+
   // Show pantry details in side panel
   function showPantryDetails(pantry) {
     currentPantry = pantry;
@@ -434,6 +578,75 @@
     bindDonorNotesModule(detailsContent, pantry);
     bindWishlistModule(detailsContent, pantry);
     bindMessageModule(detailsContent, pantry);
+    
+    // Fetch latest telemetry (API → pantry_data → donations); update stock with weight and source badge
+    function applyStockFromWeight(weightKg, source) {
+      if (weightKg == null || !window.PantryAPI || !window.PantryAPI.isWeightInReasonableRange(weightKg)) return false;
+      const badge = window.PantryAPI.computeStockLevelFromWeight(weightKg);
+      if (!badge) return false;
+      const stockSection = document.querySelector('.stock-section .stock-card');
+      if (!stockSection) return false;
+      const sourceLabel = source === 'donations' ? 'Estimated from donations' : 'From sensor';
+      stockSection.innerHTML = `
+        <div class="stock-card-head">
+          <h2>Stock level</h2>
+          <span class="stock-source-badge">${sourceLabel} · ${Number(weightKg).toFixed(1)} kg</span>
+        </div>
+        ${renderStockGauge(0, 40, badge.level)}
+      `;
+      return true;
+    }
+    if (window.PantryAPI && pantry && pantry.id) {
+      const pid = pantry.id;
+      var stockSection = document.querySelector('.stock-section .stock-card');
+      function showStockUnavailable() {
+        if (!stockSection) return;
+        stockSection.innerHTML = `
+          <div class="stock-card-head">
+            <h2>Stock level</h2>
+            <span class="stock-source-badge stock-source-badge-inactive">Sensor data unavailable. No reported stock in the last 24h.</span>
+          </div>
+          ${renderStockGauge(0, 40, 'inactive')}
+        `;
+      }
+      if (typeof window.PantryAPI.getTelemetryLatest === 'function') {
+        window.PantryAPI.getTelemetryLatest(pid).then(function (telemetry) {
+          if (telemetry) {
+            const weightKg = telemetry.weight != null ? Number(telemetry.weight) : (telemetry.weightKg != null ? Number(telemetry.weightKg) : null);
+            const source = telemetry.source || 'sensor';
+            if (applyStockFromWeight(weightKg, source)) return;
+          }
+          // Explicit fallback: try donation-based stock (in case telemetry fallback order skipped it)
+          if (typeof window.PantryAPI.getDonationBasedStock === 'function') {
+            return window.PantryAPI.getDonationBasedStock(pid).then(function (donationStock) {
+              if (donationStock && donationStock.weightKg != null && applyStockFromWeight(donationStock.weightKg, donationStock.source || 'donations')) return;
+              return loadStockFromPantryDataJson(pid).then(function (w) {
+                if (!applyStockFromWeight(w, 'fallback_local')) showStockUnavailable();
+              });
+            });
+          }
+          return loadStockFromPantryDataJson(pid).then(function (w) {
+            if (!applyStockFromWeight(w, 'fallback_local')) showStockUnavailable();
+          });
+        }).catch(function () {
+          if (typeof window.PantryAPI.getDonationBasedStock === 'function') {
+            return window.PantryAPI.getDonationBasedStock(pid).then(function (donationStock) {
+              if (donationStock && donationStock.weightKg != null && applyStockFromWeight(donationStock.weightKg, donationStock.source || 'donations')) return;
+              return loadStockFromPantryDataJson(pid).then(function (w) {
+                if (!applyStockFromWeight(w, 'fallback_local')) showStockUnavailable();
+              });
+            });
+          }
+          return loadStockFromPantryDataJson(pid).then(function (w) {
+            if (!applyStockFromWeight(w, 'fallback_local')) showStockUnavailable();
+          });
+        });
+      } else {
+        loadStockFromPantryDataJson(pid).then(function (w) {
+          if (!applyStockFromWeight(w, 'fallback_local')) showStockUnavailable();
+        });
+      }
+    }
     
     // Show details panel
     const detailsPanel = document.getElementById('details');
@@ -468,6 +681,21 @@
     const pantryTypeLabel = pantry.pantryType
       ? pantry.pantryType.charAt(0).toUpperCase() + pantry.pantryType.slice(1)
       : 'Pantry';
+    
+    // 逻辑：先看 hardware（传感器/重量），没有再用 donation
+    const weightKg = pantry.stockLevelWeightKg != null ? Number(pantry.stockLevelWeightKg) : null;
+    const hasHardware = weightKg != null && window.PantryAPI && typeof window.PantryAPI.isWeightInReasonableRange === 'function' && window.PantryAPI.isWeightInReasonableRange(weightKg);
+    const sensorBadge = hasHardware && typeof window.PantryAPI.computeStockLevelFromWeight === 'function' ? window.PantryAPI.computeStockLevelFromWeight(weightKg) : null;
+
+    let stockHtml;
+    let stockSourceBadge = '';
+    if (sensorBadge) {
+      stockSourceBadge = '<span class="stock-source-badge">From sensor · ' + Number(weightKg).toFixed(1) + ' kg</span>';
+      stockHtml = renderStockGauge(0, 40, sensorBadge.level);
+    } else {
+      stockSourceBadge = '<span class="stock-source-badge stock-source-badge-inactive">Loading...</span>';
+      stockHtml = renderStockGauge(0, 40, 'inactive');
+    }
 
     return `
       <div class="detail-hero">
@@ -485,8 +713,9 @@
         <div class="stock-card">
           <div class="stock-card-head">
             <h2>Stock level</h2>
+            ${stockSourceBadge}
           </div>
-          ${renderStockGauge(totalItems)}
+          ${stockHtml}
         </div>
       </section>
 
@@ -526,9 +755,10 @@
     const closeBtn = document.getElementById('closeDetails');
     closeBtn.addEventListener('click', () => {
       const detailsPanel = document.getElementById('details');
-      // If a pantry is selected, always go back to the list view (P2)
+      // If a pantry is selected, always go back to the list view (P2) and reset map to default 5km view
       if (currentPantry) {
         currentPantry = null;
+        resetMapToDefaultView();
         detailsPanel.classList.remove('collapsed');
         showListForCurrentView();
         updateCollapseButton(false);
@@ -616,6 +846,121 @@
     }
   }
 
+  // Load latest weight from pantry_data.json (device_to_pantry + scale1..4) for hardware pantry e.g. 254
+  async function loadStockFromPantryDataJson(pantryId) {
+    try {
+      const pid = String(pantryId || '');
+      // Try multiple base paths so fetch works whether page is at / or /index.html or /frontend/
+      var dtpResp = await fetch('./data/device_to_pantry.json?' + Date.now());
+      if (!dtpResp || !dtpResp.ok) dtpResp = await fetch('data/device_to_pantry.json?' + Date.now());
+      if (!dtpResp || !dtpResp.ok) return null;
+      const deviceToPantry = await dtpResp.json();
+      const deviceId = Object.keys(deviceToPantry).find(function (k) { return String(deviceToPantry[k]) === pid || String(deviceToPantry[k]) === 'p-' + pid.replace(/^p-?/i, ''); });
+      if (!deviceId) return null;
+      var dataResp = await fetch('./pantry_data.json?' + Date.now());
+      if (!dataResp || !dataResp.ok) dataResp = await fetch('pantry_data.json?' + Date.now());
+      if (!dataResp || !dataResp.ok) return null;
+      const list = await dataResp.json();
+      const rows = Array.isArray(list) ? list.filter(function (r) { return (r.device_id || r.deviceId || '') === deviceId; }) : [];
+      if (rows.length === 0) return null;
+      const latest = rows.reduce(function (best, row) {
+        const ts = new Date(row.timestamp || row.ts || row.time || 0).getTime();
+        if (!best) return { row: row, ts: ts };
+        return ts > best.ts ? { row: row, ts: ts } : best;
+      }, null);
+      if (!latest || !latest.row) return null;
+      const r = latest.row;
+      const s1 = Number(r.scale1 ?? 0);
+      const s2 = Number(r.scale2 ?? 0);
+      const s3 = Number(r.scale3 ?? 0);
+      const s4 = Number(r.scale4 ?? 0);
+      if (![s1, s2, s3, s4].some(function (v) { return Number.isFinite(v) && v !== 0; })) return null;
+      var weightKg = s1 + s2 + s3 + s4;
+      // Scales can be negative (unloaded); clamp to 0 so we show "Low" instead of rejecting
+      if (Number.isFinite(weightKg) && weightKg < 0) weightKg = 0;
+      return Number.isFinite(weightKg) ? weightKg : null;
+    } catch (e) {
+      console.warn('loadStockFromPantryDataJson failed', e);
+      return null;
+    }
+  }
+
+  function updateStockLevelFromDonations(pantry, donations) {
+    // 有 hardware（传感器/重量）时不覆盖，只用 donation 补没有 hardware 的情况
+    const weightKg = pantry.stockLevelWeightKg != null ? Number(pantry.stockLevelWeightKg) : null;
+    if (weightKg != null && window.PantryAPI && typeof window.PantryAPI.isWeightInReasonableRange === 'function' && window.PantryAPI.isWeightInReasonableRange(weightKg)) {
+      return;
+    }
+    // Pantry 254 (Beacon Hill) uses hardware telemetry; don't overwrite with "Lack of donation information"
+    const pantryIdStr = String(pantry.id || '');
+    if (pantryIdStr === '254' || pantryIdStr === 'p-254') {
+      return;
+    }
+    
+    // Find the stock gauge element
+    const stockSection = document.querySelector('.stock-section .stock-card');
+    if (!stockSection) return;
+    
+    // Recent donations within 24 hours (already filtered by caller)
+    const recentDonations = donations && donations.length > 0 ? donations : [];
+    
+    // Count by donationSize: 5+ low_donation (ONE OR FEW ITEMS) → medium; 2+ medium_donation (ABOUT 1 GROCERY BAG) → high
+    const countLow = recentDonations.filter(d => (d.donationSize || '') === 'low_donation').length;
+    const countMedium = recentDonations.filter(d => (d.donationSize || '') === 'medium_donation').length;
+    const countHigh = recentDonations.filter(d => (d.donationSize || '') === 'high_donation').length;
+    
+    let level = null;
+    let badgeLabel = 'Based on recent donation';
+    
+    if (countMedium >= 2) {
+      // 2+ "ABOUT ONE GROCERY BAG" → high_donation
+      level = 'high';
+      badgeLabel = 'Based on recent donations (2+ grocery bags)';
+    } else if (countLow >= 5) {
+      // 5+ "ONE OR FEW ITEMS" → medium_donation
+      level = 'medium';
+      badgeLabel = 'Based on recent donations (5+ small donations)';
+    }
+    
+    // Fallback: use most recent donation's size
+    if (level == null) {
+      const mostRecentDonation = recentDonations.length > 0 ? recentDonations[0] : null;
+      if (!mostRecentDonation || !mostRecentDonation.donationSize) {
+        stockSection.innerHTML = `
+          <div class="stock-card-head">
+            <h2>Stock level</h2>
+            <span class="stock-source-badge stock-source-badge-inactive">Lack of donation information</span>
+          </div>
+          ${renderStockGauge(0, 40, 'inactive')}
+        `;
+        return;
+      }
+      const donationSize = mostRecentDonation.donationSize;
+      if (donationSize === 'low_donation') level = 'low';
+      else if (donationSize === 'medium_donation') level = 'medium';
+      else if (donationSize === 'high_donation') level = 'high';
+    }
+    
+    if (level == null) {
+      stockSection.innerHTML = `
+        <div class="stock-card-head">
+          <h2>Stock level</h2>
+          <span class="stock-source-badge stock-source-badge-inactive">Lack of donation information</span>
+        </div>
+        ${renderStockGauge(0, 40, 'inactive')}
+      `;
+      return;
+    }
+    
+    stockSection.innerHTML = `
+      <div class="stock-card-head">
+        <h2>Stock level</h2>
+        <span class="stock-source-badge">${badgeLabel}</span>
+      </div>
+      ${renderStockGauge(0, 40, level)}
+    `;
+  }
+
   async function loadDonorNotes(pantry) {
     if (!pantry || !pantry.id || !donorNotesState.root) return;
     const container = donorNotesState.root;
@@ -625,19 +970,25 @@
       const data = await window.PantryAPI.getDonations(pantry.id, 1, 100);
       const allItems = data?.items || [];
       
-      // Filter items within 24 hours
+      // Backend already returns only donations within 24h; use all items (robust timestamp: createdAt/created_at/timestamp)
       const now = Date.now();
       const twentyFourHoursAgo = now - (24 * 60 * 60 * 1000);
-      const recentItems = allItems.filter(item => {
-        const createdAt = item.createdAt ? new Date(item.createdAt).getTime() : 0;
-        return createdAt >= twentyFourHoursAgo;
-      });
+      const getDonationTimeMs = (item) => {
+        const raw = item.createdAt ?? item.created_at ?? item.timestamp;
+        if (raw == null || raw === '') return now;
+        const t = new Date(raw).getTime();
+        return Number.isFinite(t) ? t : now;
+      };
+      const recentItems = allItems.filter(item => getDonationTimeMs(item) >= twentyFourHoursAgo);
       
       donorNotesState.items = recentItems;
       donorNotesState.pantryId = String(pantry.id);
       donorNotesState.expanded = false;
       
       renderDonorNotes();
+      
+      // Update Stock Level based on donations if no hardware sensor data
+      updateStockLevelFromDonations(pantry, recentItems);
     } catch (error) {
       console.error('Error loading donor notes:', error);
       container.innerHTML = '<div class="donor-note-empty">Unable to load.</div>';
@@ -912,7 +1263,10 @@
     donorNotesState.root = latestEl;
     donorNotesState.pantryId = String(pantry.id);
 
-    addBtn.onclick = () => openDonorNoteModal(pantry, () => loadDonorNotes(pantry));
+    addBtn.onclick = () => openDonorNoteModal(pantry, async () => {
+      await loadDonorNotes(pantry);
+      refreshStockSectionForPantry(pantry);
+    });
     
     if (toggleBtn) {
       toggleBtn.onclick = () => {
@@ -1236,6 +1590,34 @@
       // This would need to be implemented with actual pantry data
       // For now, just show all markers
       marker.setOpacity(1);
+    });
+  }
+
+  // Update map marker visibility based on filter
+  function updateMapMarkerVisibility() {
+    const selectedType = listControlsState.type;
+    
+    allPantries.forEach(pantry => {
+      const marker = markers.get(pantry.id);
+      if (!marker) return;
+      
+      const pantryType = (pantry.pantryType || '').toLowerCase();
+      
+      // Green markers (uncategorized) should always be visible
+      const isUncategorized = !pantryType || (pantryType !== 'shelf' && pantryType !== 'fridge');
+      
+      // Show/hide marker based on type filter
+      if (selectedType === 'all' || isUncategorized) {
+        // Show all markers when "all" selected, or always show uncategorized (green)
+        marker.setOpacity(1);
+      } else {
+        // Show only markers that match the selected type
+        if (pantryType === selectedType) {
+          marker.setOpacity(1);
+        } else {
+          marker.setOpacity(0);
+        }
+      }
     });
   }
 

@@ -16,6 +16,15 @@ function parsePositiveInt(value: string | null, fallback: number): number {
   return parsed;
 }
 
+/** Normalize pantryId so "p-1", "1", "pantry-1" all map to the same key (avoids empty list after refresh when UI uses different id format). */
+function normalizePantryId(pantryId: string): string {
+  const t = (pantryId ?? "").trim();
+  if (!t) return t;
+  const numeric = t.replace(/^(?:pantry|p)[-_]?/i, "").trim();
+  if (/^\d+$/.test(numeric)) return numeric;
+  return t;
+}
+
 // 🔹 in-memory donor notes (per pantry)
 type DonorNote = {
   id: string;
@@ -39,18 +48,22 @@ async function getDonations(req: HttpRequest): Promise<HttpResponseInit> {
     return json(400, { error: "Missing pantryId." }, origin);
   }
 
-  let list = donorNotesByPantry.get(pantryId) ?? [];
-  
-  // Filter out posts older than 24 hours
+  const key = normalizePantryId(pantryId);
+  let list = donorNotesByPantry.get(key) ?? [];
+
+  // Filter out posts older than 24 hours (ISO createdAt); invalid/missing dates treated as recent so we don't drop donations
   const now = Date.now();
   const twentyFourHoursAgo = now - (24 * 60 * 60 * 1000);
-  list = list.filter(item => {
-    const createdAt = item.createdAt ? new Date(item.createdAt).getTime() : 0;
+  list = list.filter((item) => {
+    const raw = item.createdAt;
+    if (!raw || typeof raw !== "string") return true;
+    const createdAt = new Date(raw).getTime();
+    if (!Number.isFinite(createdAt)) return true;
     return createdAt >= twentyFourHoursAgo;
   });
-  
+
   // Update the stored list (remove old items)
-  donorNotesByPantry.set(pantryId, list);
+  donorNotesByPantry.set(key, list);
   
   const total = list.length;
   const start = (page - 1) * pageSize;
@@ -69,10 +82,11 @@ async function postDonation(req: HttpRequest): Promise<HttpResponseInit> {
     return json(400, { error: "Invalid JSON body." }, origin);
   }
 
-  const pantryId = (body?.pantryId ?? "").trim();
-  if (!pantryId) {
+  const rawPantryId = (body?.pantryId ?? "").trim();
+  if (!rawPantryId) {
     return json(400, { error: "Missing pantryId." }, origin);
   }
+  const pantryId = normalizePantryId(rawPantryId);
 
   const note = typeof body.note === "string" ? body.note.trim() : undefined;
   const donationSize = typeof body.donationSize === "string" ? body.donationSize.trim() : undefined;
