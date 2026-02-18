@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 // PantryMap 地图页面的 URL
-const PANTRY_MAP_URL = process.env.NEXT_PUBLIC_PANTRY_MAP_URL || "http://localhost:3000";
+const PANTRY_MAP_URL = process.env.NEXT_PUBLIC_PANTRY_MAP_URL || "https://polite-field-023e15d1e.6.azurestaticapps.net";
 
 export default function MapPage() {
   const [isLoading, setIsLoading] = useState(true);
