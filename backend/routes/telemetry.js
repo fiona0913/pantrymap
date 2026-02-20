@@ -29,6 +29,42 @@ router.post('/', requireApiKey, async (req, res) => {
   }
 });
 
+// GET /api/telemetry/latest?pantryId=... — same shape as Azure/Frontend expect (Beacon Hill 254, etc.)
+router.get('/latest', async (req, res) => {
+  try {
+    const { pantryId } = req.query;
+    if (!pantryId) return res.status(400).json({ error: 'Missing pantryId.' });
+
+    const row = await getQuery(
+      'SELECT * FROM telemetry WHERE pantry_id = ? ORDER BY ts DESC LIMIT 1',
+      [String(pantryId).trim()]
+    );
+    if (!row) return res.json({ latest: null });
+
+    const metrics = row.metrics ? (typeof row.metrics === 'string' ? JSON.parse(row.metrics) : row.metrics) : {};
+    const weightKg = metrics.weightKg ?? metrics.weight ?? null;
+    const num = weightKg != null ? Number(weightKg) : null;
+    const validWeight = num != null && Number.isFinite(num) ? num : null;
+    const ts = row.ts ?? null;
+    const tsStr = ts != null ? (typeof ts === 'string' ? ts : (ts instanceof Date ? ts.toISOString() : String(ts))) : null;
+
+    if (validWeight != null && tsStr != null) {
+      return res.json({
+        latest: {
+          weightKg: Math.round(validWeight * 100) / 100,
+          weight: validWeight,
+          timestamp: tsStr,
+          updatedAt: tsStr,
+        },
+      });
+    }
+    return res.json({ latest: null });
+  } catch (err) {
+    console.error('Error querying telemetry latest:', err);
+    return res.status(500).json({ ok: false, code: 'server_error', message: err.message });
+  }
+});
+
 // GET /api/telemetry?pantryId=...&latest=true
 // GET /api/telemetry?pantryId=...&from=...&to=...
 router.get('/', async (req, res) => {

@@ -337,42 +337,35 @@ async function initDetailView(pantry) {
   }
   // 1) 优先用实时 telemetry API（Beacon Hill 254 等）更新传感器重量
   if (typeof window._applyTelemetryLatestToPantry === 'function') {
-    try {
-      await window._applyTelemetryLatestToPantry(pantry.id);
-    } catch (e) { console.warn('getTelemetryLatest failed', e); }
+    try { await window._applyTelemetryLatestToPantry(pantry.id); } catch (e) { console.warn('getTelemetryLatest failed', e); }
+  }
+  // Recent Activity Summary 仅来自后端 API；无 API 门活动数据时显示「无法读数」，不用本地 JSON/CSV 填充
+  if (typeof window._loadActivitySummaryFromApiOnly === 'function') {
+    try { await window._loadActivitySummaryFromApiOnly(pantry.id); } catch (e) { console.warn('loadActivitySummaryFromApiOnly failed', e); }
   }
   if (typeof window._loadPantryDataJsonAndRender === 'function') {
     try {
-      const result = await window._loadPantryDataJsonAndRender(pantry.id);
+      const result = await window._loadPantryDataJsonAndRender(pantry.id, true);
       if (result) {
-        // 每 30 分钟重新请求实时 telemetry + pantry_data 并刷新 Sensors
         const THIRTY_MIN_MS = 30 * 60 * 1000;
         window._pantryDataRefreshInterval = setInterval(async () => {
           if (currentView !== 'detail' || !selectedPantry || selectedPantry.id !== pantry.id) return;
           try {
-            if (typeof window._applyTelemetryLatestToPantry === 'function') {
-              await window._applyTelemetryLatestToPantry(pantry.id);
-            }
-            await window._loadPantryDataJsonAndRender(pantry.id);
+            if (typeof window._applyTelemetryLatestToPantry === 'function') await window._applyTelemetryLatestToPantry(pantry.id);
+            if (typeof window._loadActivitySummaryFromApiOnly === 'function') await window._loadActivitySummaryFromApiOnly(pantry.id);
+            await window._loadPantryDataJsonAndRender(pantry.id, true);
           } catch (e) {}
         }, THIRTY_MIN_MS);
-      } else {
-        if (selectedPantry && String(selectedPantry.id) === String(pantry.id) && selectedPantry.sensorsUnavailable && typeof applyPantryDataToUI === 'function') {
-          applyPantryDataToUI({
-            modules: {
-              performance: { sensorsUnavailable: true },
-              persona: { name: selectedPantry.name || 'My Pantry', status: selectedPantry.status || 'Open' },
-              highlights: { recentActivity: [] },
-            },
-          });
-        }
-        if (typeof window._loadBeaconCSVAndRender === 'function') {
-          await window._loadBeaconCSVAndRender('BeaconHill_2026-01-22_to_2026-01-29.csv');
-        }
+      } else if (selectedPantry && String(selectedPantry.id) === String(pantry.id) && selectedPantry.sensorsUnavailable && typeof applyPantryDataToUI === 'function') {
+        applyPantryDataToUI({
+          modules: {
+            performance: { sensorsUnavailable: true },
+            persona: { name: selectedPantry.name || 'My Pantry', status: selectedPantry.status || 'Open' },
+            highlights: { recentActivity: [] },
+          },
+        });
       }
-    } catch(e) {}
-  } else if (typeof window._loadBeaconCSVAndRender === 'function') {
-    try { await window._loadBeaconCSVAndRender('BeaconHill_2026-01-22_to_2026-01-29.csv'); } catch(e) {}
+    } catch (e) {}
   }
 
   // Reset tabs to overview
@@ -558,19 +551,29 @@ document.addEventListener('DOMContentLoaded', function() {
     <div><strong>Contact:</strong> ${escapeHtml(pantry.contact?.owner||'—')} ${pantry.contact?.phone?` · ${escapeHtml(pantry.contact.phone)}`:''} ${pantry.contact?.email?` · <a href="mailto:${escapeHtml(pantry.contact.email)}">${escapeHtml(pantry.contact.email)}</a>`:''}</div>
   `; }
 
-  // Initialize mini map preview inside Overview
+  // Initialize mini map preview: center on pantry's exact lat/lng and show a pin at that address
   function setupMiniMap(pantry){ try{
-    if (!pantry || !pantry.location || typeof pantry.location.lat !== 'number' || typeof pantry.location.lng !== 'number') return;
+    if (!pantry || !pantry.location) return;
+    const lat = Number(pantry.location.lat);
+    const lng = Number(pantry.location.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     const id = 'pantry-mini-map';
     const el = document.getElementById(id);
     if (!el) return;
-    // ensure container has proper positioning and overflow
     el.style.position = el.style.position || 'relative';
     el.style.overflow = 'hidden';
-    // Avoid reinitializing
-    if (el._leaflet_map) { try{ el._leaflet_map.setView([pantry.location.lat, pantry.location.lng], 14); el._leaflet_map.invalidateSize(); }catch(e){} return; }
-    const lat = pantry.location.lat; const lng = pantry.location.lng;
-    // initialize Leaflet map with interaction limits
+    const zoom = 17; // street-level so the pin shows the exact address
+    if (el._leaflet_map) {
+      try {
+        el._leaflet_map.setView([lat, lng], zoom);
+        el._leaflet_map.invalidateSize();
+        if (el._leaflet_marker) {
+          el._leaflet_marker.setLatLng([lat, lng]);
+          el._leaflet_marker.setPopupContent(`<strong>${escapeHtml(pantry.name||'Pantry')}</strong><br>${escapeHtml(pantry.address||'')}`);
+        }
+      } catch(e) {}
+      return;
+    }
     const miniMap = L.map(id, {
       attributionControl: false,
       zoomControl: true,
@@ -579,17 +582,15 @@ document.addEventListener('DOMContentLoaded', function() {
       boxZoom: false,
       keyboard: false,
       dragging: true
-    }).setView([lat, lng], 14);
+    }).setView([lat, lng], zoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(miniMap);
     const marker = L.marker([lat, lng]).addTo(miniMap);
     marker.bindPopup(`<strong>${escapeHtml(pantry.name||'Pantry')}</strong><br>${escapeHtml(pantry.address||'')}`);
     el._leaflet_map = miniMap;
-    // ensure responsive resize and proper sizing after render
+    el._leaflet_marker = marker;
     setTimeout(()=> { try{ miniMap.invalidateSize(); }catch(e){} }, 120);
-    // also invalidate on window resize
     const resizeHandler = () => { try{ miniMap.invalidateSize(); }catch(e){} };
     window.addEventListener('resize', resizeHandler);
-    // store handler so it can be removed if needed later
     el._leaflet_resizeHandler = resizeHandler;
   }catch(e){ console.warn('mini-map init error', e); } }
 
@@ -880,11 +881,23 @@ document.addEventListener('DOMContentLoaded', function() {
   // Chart renderers (reuse simplified logic)
   function renderWeightChartInto(container, data, cycles){ const svg = document.querySelector('[data-weight-chart]'); const legend = document.querySelector('[data-weight-legend]'); const rangeLabel = document.querySelector('[data-weight-range]'); if(!svg||!legend||!rangeLabel) return; if(!Array.isArray(data)||data.length===0){ svg.innerHTML=''; legend.textContent='No weight data available.'; rangeLabel.textContent=''; return; } const width=svg.viewBox.baseVal.width||720; const height=svg.viewBox.baseVal.height||320; const margin={top:20,right:32,bottom:36,left:56}; const plotWidth=width-margin.left-margin.right; const plotHeight=height-margin.top-margin.bottom; const minWeight=Math.min(...data.map(d=>d.weightKg)); const maxWeight=Math.max(...data.map(d=>d.weightKg)); const scaleY=(v)=> maxWeight===minWeight? margin.top+plotHeight/2 : margin.top + (maxWeight - v)*(plotHeight/(maxWeight-minWeight)); const scaleX=(i)=> data.length===1? margin.left + plotWidth/2 : margin.left + (i/(data.length-1))*plotWidth; const points = data.map((d,i)=>`${scaleX(i)},${scaleY(d.weightKg)}`).join(' '); svg.innerHTML = `<rect x="${margin.left}" y="${margin.top}" width="${plotWidth}" height="${plotHeight}" fill="var(--bg)" stroke="var(--border)" stroke-width="1" rx="8"></rect><polyline fill="none" stroke="var(--accent)" stroke-width="3" points="${points}"></polyline>${data.map((d,i)=>`<circle class="weight-point" data-ts="${d.ts}" cx="${scaleX(i)}" cy="${scaleY(d.weightKg)}" r="4" fill="var(--primary)"><title>${formatDateTimeMinutes(d.ts)} — ${d.weightKg.toFixed(2)} kg</title></circle>`).join('')}`; legend.textContent = `Min ${minWeight.toFixed(2)} kg · Max ${maxWeight.toFixed(2)} kg`; rangeLabel.textContent = `${formatDateTimeMinutes(data[0].ts)} → ${formatDateTimeMinutes(data[data.length-1].ts)}`; }
 
+  // 门状态/活动无法读取时统一显示报错文案；有数据后由 renderCycleCards / renderDoorTimeline 正常显示
+  function renderDoorActivityUnavailable(){
+    window._csvCycles = [];
+    const list = document.getElementById('activitySummaryList');
+    const timeline = document.querySelector('[data-door-timeline]');
+    const summary = document.querySelector('[data-door-summary]');
+    const msg = 'Error: Unable to read sensor data. Weight increase/decrease will be shown here once data is available.';
+    if (list) list.innerHTML = '<div class="history-placeholder sensor-unavailable">' + escapeHtml(msg) + '</div>';
+    if (timeline) timeline.innerHTML = '<div class="history-placeholder sensor-unavailable">' + escapeHtml(msg) + '</div>';
+    if (summary) summary.textContent = '';
+  }
+
   function renderDoorTimelineInto(container, data, cycles){
     const timeline = document.querySelector('[data-door-timeline]');
     const summary = document.querySelector('[data-door-summary]');
     if(!timeline||!summary) return;
-    if(!Array.isArray(data)||data.length===0){ timeline.innerHTML='<div class="history-placeholder">No door events recorded.</div>'; summary.textContent=''; return; }
+    if(!Array.isArray(data)||data.length===0){ timeline.innerHTML='<div class="history-placeholder sensor-unavailable">Error: Unable to read sensor data. Weight increase/decrease will be shown here once data is available.</div>'; summary.textContent=''; return; }
     // show most recent 15 events, compact
     const recent = data.slice(-15).reverse();
     const ul = document.createElement('ul'); ul.className = 'door-events-compact';
@@ -1213,8 +1226,57 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
 
-  // Load pantry_data.json for a pantry: use device_to_pantry to get device_id (e.g. BeaconHill -> p-2), filter JSON by device_id, render Sensors
-  async function loadPantryDataJsonAndRender(pantryId) {
+  // Recent Activity Summary 仅用后端 API 数据；无 API 门活动数据时显示无法读数，不用本地 JSON/CSV 填充
+  async function loadActivitySummaryFromApiOnly(pantryId) {
+    if (!window.PantryAPI || typeof window.PantryAPI.getTelemetryHistory !== 'function') {
+      if (typeof renderDoorActivityUnavailable === 'function') renderDoorActivityUnavailable();
+      return;
+    }
+    try {
+      const items = await window.PantryAPI.getTelemetryHistory(pantryId);
+      if (!Array.isArray(items) || items.length === 0) {
+        if (typeof renderDoorActivityUnavailable === 'function') renderDoorActivityUnavailable();
+        return;
+      }
+      const raw = items.map(it => {
+        const ts = it.ts || it.timestamp;
+        const metrics = typeof it.metrics === 'string' ? (function(){ try { return JSON.parse(it.metrics); } catch(e){ return {}; } })() : (it.metrics || {});
+        const flags = typeof it.flags === 'string' ? (function(){ try { return JSON.parse(it.flags); } catch(e){ return {}; } })() : (it.flags || {});
+        const mass = Number(metrics.weightKg ?? metrics.weight ?? NaN);
+        const doorVal = flags.door ?? it.door;
+        const door = (doorVal === 'open' || doorVal === 1 || doorVal === '1') ? 1 : (doorVal === 'closed' || doorVal === 0 || doorVal === '0') ? 0 : null;
+        return { timestamp: ts, ts: ts, mass: Number.isFinite(mass) ? mass : 0, door };
+      }).filter(d => d.door !== null);
+      if (raw.length === 0) {
+        if (typeof renderDoorActivityUnavailable === 'function') renderDoorActivityUnavailable();
+        return;
+      }
+      raw.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+      const processed = processEvents(raw);
+      if (!processed.activitySummary || processed.activitySummary.length === 0) {
+        if (typeof renderDoorActivityUnavailable === 'function') renderDoorActivityUnavailable();
+        return;
+      }
+      const cycles = processed.activitySummary.map(a => ({
+        startTs: new Date(a.openTimestamp),
+        endTs: new Date(a.closeTimestamp),
+        durationSec: a.duration,
+        change: a.weightChange,
+      }));
+      window._csvCycles = cycles;
+      renderCycleCards(cycles);
+      const weightTrendData = (processed.weightTrendData || []).map(d => ({ ts: d.ts || d.timestamp, weightKg: d.mass }));
+      renderWeightChartInto(null, weightTrendData, cycles);
+      const doorData = (processed.doorEventsList || []).map(d => ({ ts: d.timestamp, status: (d.state || '').toLowerCase() }));
+      renderDoorTimelineInto(null, doorData, cycles);
+    } catch (e) {
+      console.warn('loadActivitySummaryFromApiOnly failed', e);
+      if (typeof renderDoorActivityUnavailable === 'function') renderDoorActivityUnavailable();
+    }
+  }
+
+  // Load pantry_data.json for a pantry: 仅更新 Overview（重量/温度等）；skipActivityRender 为 true 时不渲染 Activity Summary（由 API 专管）
+  async function loadPantryDataJsonAndRender(pantryId, skipActivityRender) {
     try {
       const dtpResp = await fetch('./data/device_to_pantry.json?' + Date.now());
       if (!dtpResp || !dtpResp.ok) return null;
@@ -1229,7 +1291,7 @@ document.addEventListener('DOMContentLoaded', function() {
       if (rows.length === 0) return null;
 
       const entries = buildEntriesFromRows(rows);
-      const processed = processEntriesAndRender(entries);
+      const processed = skipActivityRender ? null : processEntriesAndRender(entries);
 
       // 同步 Overview 区域的 Current Weight / Temperature / Battery / Door Visits 到最新 SQL 记录
       try {
@@ -1263,7 +1325,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // 2) 温度 / 电量 / 门访问次数
             const tempC = typeof r.air_temp === 'number' ? Number(r.air_temp.toFixed(1)) : undefined;
             const batteryPct = typeof r.batt_percent === 'number' ? Math.round(r.batt_percent) : undefined;
-            const doorVisits = typeof processed?.opens === 'number' ? processed.opens : undefined;
+            const doorVisits = (processed && typeof processed.opens === 'number') ? processed.opens : undefined;
 
             // Prefer real-time API weight; else use pantry_data totalKg (fallback). Clear sensorsUnavailable when we have fallback data.
             const weightForStock = selectedPantry?.sensors?.weightKg ?? selectedPantry?.stockLevelWeightKg ?? totalKg;
@@ -1299,7 +1361,7 @@ document.addEventListener('DOMContentLoaded', function() {
         console.warn('Failed to update Overview status cards from pantry_data.json', e);
       }
 
-      return processed;
+      return processed != null ? processed : { entries };
     } catch (e) {
       console.warn('loadPantryDataJsonAndRender failed', e);
       return null;
@@ -1322,14 +1384,14 @@ document.addEventListener('DOMContentLoaded', function() {
     return processEntriesAndRender(entries);
   }
 
-  // Render filtered cycle cards into #activitySummaryList
+  // Render filtered cycle cards into #activitySummaryList；无门活动数据时显示无法读数，有数据时显示每次重量增加/减少
   function renderCycleCards(allCycles) {
     const container = document.getElementById('activitySummaryList');
     if (!container) return;
     container.innerHTML = '';
 
     if (!allCycles || allCycles.length === 0) {
-      container.innerHTML = '<div class="history-placeholder">No door cycles detected in CSV data.</div>';
+      container.innerHTML = '<div class="history-placeholder sensor-unavailable">Error: Unable to read sensor data. Weight increase/decrease will be shown here once data is available.</div>';
       return;
     }
 
@@ -1355,7 +1417,8 @@ document.addEventListener('DOMContentLoaded', function() {
     container.appendChild(countDiv);
 
     if (filtered.length === 0) {
-      container.innerHTML += '<div class="history-placeholder">No door cycles found for this time range.</div>';
+      container.appendChild(document.createElement('div')).className = 'history-placeholder sensor-unavailable';
+      container.lastElementChild.textContent = 'Error: Unable to read sensor data. Weight increase/decrease will be shown here once data is available.';
       return;
     }
 
@@ -1441,6 +1504,8 @@ document.addEventListener('DOMContentLoaded', function() {
   window._renderActivities = renderActivities;
   window._getActivitiesByPantryId = getActivitiesByPantryId;
   window._initSettingsSection = initSettingsSection;
+  window._renderDoorActivityUnavailable = renderDoorActivityUnavailable;
+  window._loadActivitySummaryFromApiOnly = loadActivitySummaryFromApiOnly;
   window._loadBeaconCSVAndRender = loadBeaconCSVAndRender;
   window._loadPantryDataJsonAndRender = loadPantryDataJsonAndRender;
   window._applyTelemetryLatestToPantry = applyTelemetryLatestToPantry;

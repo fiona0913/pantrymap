@@ -296,6 +296,8 @@
     </div>
 
     <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+    <!-- 接 Azure：Wishlist 从 Cosmos 拉取（与主地图页用户上传一致），传感器走 telemetry/latest。本地：7071；生产请改为 https://YOUR-APP.azurewebsites.net/api -->
+    <script>window.PantryAPI_CONFIG = window.PantryAPI_CONFIG || { apiBaseUrl: 'http://localhost:7071/api' };</script>
     <script src="./api.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script src="./my-pantry.js"></script>
