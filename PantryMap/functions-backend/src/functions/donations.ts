@@ -140,9 +140,30 @@ async function postDonation(req: HttpRequest, ctx: InvocationContext): Promise<H
   };
 
   const container = getDonationsContainer();
-  await container.items.create(item);
-
-  return json(201, item, origin);
+  try {
+    const result = await container.items.create(item);
+    const donationId = result.resource?.id ?? item.id;
+    ctx.log(
+      JSON.stringify({
+        pantryId,
+        donationId,
+        createdAt: item.createdAt,
+        containerName: container.id,
+      })
+    );
+    return json(201, item, origin);
+  } catch (err: unknown) {
+    const e = err as { code?: string; message?: string; stack?: string };
+    ctx.error(
+      JSON.stringify({
+        pantryId,
+        errorCode: e?.code,
+        errorMessage: e?.message,
+        stack: e?.stack,
+      })
+    );
+    throw err;
+  }
 }
 
 async function handler(req: HttpRequest, ctx: InvocationContext): Promise<HttpResponseInit> {
