@@ -1,0 +1,16 @@
+Terminal 1:
+cd "/Users/hugo/Desktop/guide-map-merge"
+npm install
+npm run dev -- -p 3001
+
+Terminal 2:
+cd "/Users/hugo/Desktop/guide-map-merge/PantryMap/functions-backend"
+npm install
+npm start -- --port 7071
+
+Terminal 3:
+cd "/Users/hugo/Desktop/guide-map-merge/PantryMap"
+npx serve -l 3000 frontend
+
+Browser:
+http://localhost:3001/map
